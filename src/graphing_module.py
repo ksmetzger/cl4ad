@@ -21,18 +21,18 @@ def plot_2D_pca(representations, folder, filename, labels = None, anomaly=None, 
 
     if labels is not None: 
         unique_labels = np.unique(labels)
-        name_mappings = {0.0:"W-Boson", 1.0:"QCD", 2.0:"Z_2", 3.0:"tt", 4.0:anomaly}
-        anomaly_colors = {0.0:'#00C142', 1.0:'#44CBB7', 2.0:'#4457CB', 3.0:'#8B15E4', 4.0:'#C01E1E'}
+        name_mappings = {0.0:"W-Boson", 1.0:"QCD", 2.0:"Z_2", 3.0:"tt", 4.0:"leptoquark",
+            5.0:"ato4l", 6.0:"hChToTauNu", 7.0:"hToTauTau"}
+        anomaly_colors = {0.0:'#00C142', 1.0:'#44CBB7', 2.0:'#4457CB', 3.0:'#8B15E4',
+            4.0:'#C01E1E', 5.0:'#1f77b4', 6.0:'#ff7f0e', 7.0:'#2ca02c'}
         default_colors = {0.0:'#1f77b4', 1.0:'#ff7f0e', 2.0:'#2ca02c', 3.0:'#d62728', 4.0:'#9467bd'}
-        
+
         # Plots representation per label. If anomaly -> uses special color pallet + opacity
-        for label in unique_labels: 
+        for label in unique_labels:
             name = name_mappings[label]
             indices = np.where(labels == label)[0]
-            if anomaly is not None: 
-                if label != 4.0: alpha, color = 0.025, anomaly_colors[label]
-                else: alpha, color = 0.0125, anomaly_colors[label]
-            else: alpha, color = 0.050, default_colors[label]
+            if label < 4.0: alpha, color = 0.025, anomaly_colors[label]
+            else: alpha, color = 0.0125, anomaly_colors[label]
             plt.scatter(components[indices, 0], components[indices, 1], label=name, alpha=0.05, c=color, s=0.7)
         
         leg = plt.legend(markerscale = 3.0, loc='upper right')
@@ -75,8 +75,10 @@ def plot_3D_pca(representations, folder, filename, labels = None, anomaly = None
 
     if labels is not None: 
         unique_labels = np.unique(labels)
-        name_mappings = {0.0:"W-Boson", 1.0:"QCD", 2.0:"Z_2", 3.0:"tt", 4.0:anomaly}
-        anomaly_colors = {0.0:'#00C142', 1.0:'#44CBB7', 2.0:'#4457CB', 3.0:'#8B15E4', 4.0:'#C01E1E'}
+        name_mappings = {0.0:"W-Boson", 1.0:"QCD", 2.0:"Z_2", 3.0:"tt", 4.0:"leptoquark",
+            5.0:"ato4l", 6.0:"hChToTauNu", 7.0:"hToTauTau"}
+        anomaly_colors = {0.0:'#00C142', 1.0:'#44CBB7', 2.0:'#4457CB', 3.0:'#8B15E4',
+            4.0:'#C01E1E', 5.0:'#1f77b4', 6.0:'#ff7f0e', 7.0:'#2ca02c'}
         default_colors = {0.0:'#1f77b4', 1.0:'#ff7f0e', 2.0:'#2ca02c', 3.0:'#d62728', 4.0:'#9467bd'}
 
         # Plots representation per label. If anomaly -> uses special color pallet + opacity
@@ -126,7 +128,8 @@ def plot_corner_plots(sample_representations, folder, filename, sample_labels, p
         '''Normalize hist heights/weights respective to other bin counts'''
         return np.ones(curr_rep_count) * (max_rep_count / curr_rep_count)
     
-    name_mappings = {0.0:"W-Boson", 1.0:"QCD", 2.0:"Z_2", 3.0:"tt", 4.0:anomaly}
+    name_mappings = {0.0:"W-Boson", 1.0:"QCD", 2.0:"Z_2", 3.0:"tt", 4.0:"leptoquark",
+        5.0:"ato4l", 6.0:"hChToTauNu", 7.0:"hToTauTau"}
     
     if plot_pca: # Updates rep to be 3 principle components instead of latent space
         pca = PCA(n_components=3) 
@@ -152,7 +155,8 @@ def plot_corner_plots(sample_representations, folder, filename, sample_labels, p
     max_rep_count = max([len(s) for s in representations])
     num_labels, num_dims = len(representations), representations[0].shape[1]
     if anomaly == None: colors = ['deeppink', 'lightseagreen', 'red', 'green', 'blueviolet'][::-1]
-    else: colors = ['deeppink', 'lightseagreen', 'gold', 'green', 'blueviolet'][::-1]
+    else: colors = ['deeppink', 'lightseagreen', 'gold', 'green', 'blueviolet',
+        'salmon', 'red', 'blue', 'orange'][::-1]
 
     plot_range = []
     for dim in range(num_dims): # Finds min and max range in each dim for histogram plots
@@ -189,7 +193,8 @@ def plot_ROC(predicted_backgrounds, predicted_anomalies, folder, filename, testi
         - if list: Comparing same classifier's performance on different anomalies
     '''
     print("Plotting ROC Plots!")   
-    colors = ['#016c59', '#7a5195', '#ef5675', '#ffa600', '#67a9cf']
+    colors = ['#016c59', '#7a5195', '#ef5675', '#ffa600', '#67a9cf',
+        '#00C142', '#44CBB7', '#4457CB', '#8B15E4', '#C01E1E']
     for ix, anomaly_name in enumerate(predicted_anomalies): 
         predicted_anomaly = predicted_anomalies[anomaly_name]
         
@@ -273,9 +278,11 @@ def plot_tSNE(representations, folder, filename, labels, anomaly = None):
     
     # Create dictionaries to associate labels with human-readable names and colors
     unique_labels = np.unique(labels)
-    name_mapping = {0.0: "W-Boson", 1.0: "QCD", 2.0: "Z_2", 3.0: "tt", 4.0: anomaly}
+    name_mappings = {0.0:"W-Boson", 1.0:"QCD", 2.0:"Z_2", 3.0:"tt", 4.0:"leptoquark",
+        5.0:"ato4l", 6.0:"hChToTauNu", 7.0:"hToTauTau"}
+    anomaly_colors = {0.0:'#00C142', 1.0:'#44CBB7', 2.0:'#4457CB', 3.0:'#8B15E4',
+        4.0:'#C01E1E', 5.0:'#1f77b4', 6.0:'#ff7f0e', 7.0:'#2ca02c'}
     default_colors = {0.0:'#1f77b4', 1.0:'#ff7f0e', 2.0:'#2ca02c', 3.0:'#d62728', 4.0:'#9467bd'}
-    anomaly_colors = {0.0:'#00C142', 1.0:'#44CBB7', 2.0:'#4457CB', 3.0:'#8B15E4', 4.0:'#C01E1E'}
 
     # Iterate over unique labels and plot associated data 
     for label in unique_labels: 

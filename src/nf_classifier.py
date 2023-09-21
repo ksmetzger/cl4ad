@@ -80,7 +80,6 @@ if __name__ == "__main__":
     # Connects to GPU, rasies an error if CPU is used
     print("Connecting to GPU")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-#     assert device == "cuda", "No GPU found for trianing. Ensure cuda is avaliable!"
     
     # Loads the data from npz file into tensorflow dataloader 
     print("Loading latent space data")

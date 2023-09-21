@@ -43,23 +43,34 @@ def maxPT_preprocess(input_array, filename):
     return tf.reshape(outputs * mask, (-1, 57))
     
     
-def zscore_preprocess(input_array):
+def zscore_preprocess(input_array, train=False, scaling_file=None):
     '''
     Normalizes using zscore scaling along pT only ->  x' = (x - μ) / σ 
     Assumes (μ, σ) constants determined by average across training batch 
     '''
     # Loads input as tensor and (μ, σ) constants predetermined from training batch.
-    tensor = tf.convert_to_tensor(input_array, dtype = tf.float32)
-    normalized_tensor = (tensor - 6.53298295) / 15.2869053
+    if train:
+        tensor = input_array.copy()
+        mu = np.mean(tensor[:,:,0,:])
+        sigma = np.std(tensor[:,:,0,:])
+        np.savez(scaling_file, mu=mu, sigma=sigma)
+
+        normalized_tensor = (tensor - mu) / sigma
+
+    else:
+        tensor = input_array.copy()
+        scaling_const = np.load(scaling_file)
+        normalized_tensor = (tensor - scaling_const['mu']) / scaling_const['sigma']
 
     # Masking so unrecorded data remains 0
-    mask = tf.math.not_equal(tensor, 0)
-    mask = tf.cast(mask, tf.float32)
-    mask = tf.squeeze(mask, -1)
-    
+    mask = np.not_equal(input_array, 0)
+    mask = np.squeeze(mask, -1)
+
     # Outputs normalized pT while preserving original values for eta and phi
-    outputs = tf.concat([normalized_tensor[:,:,0,:], tensor[:,:,1,:], tensor[:,:,2,:]], axis=2)
-    return tf.reshape(outputs * mask, (-1, 57))
+    outputs = np.concatenate([normalized_tensor[:,:,0,:], input_array[:,:,1,:], input_array[:,:,2,:]], axis=2)
+    return np.reshape(outputs * mask, (-1, 57))
+
+
 
 def linear_preprocess(input_array):
     '''

@@ -7,6 +7,20 @@
 - _Contrastive Learning:_ Trains an auto-encoder to compress raw CMS event data into a meaningful, compact latent space. Uses CL to cluster events of identical labels and distance dissimilar events. 
 - _Normalizing Flows:_ Uses normalizing flows to detect anomalous data from standard model physics events within the compressed representation. 
 
+## Creating Testing Data
+
+`python make_datasets.py --new_filename 'zscore.npz'`
+
+## Training Encoder with Contrastive Learning
+
+`python test.py --train True`
+
+## Plotting results
+
+`python test.py --plot True`
+
+`python test.py --anomaly True`
+
 ## Files
 - `configs.npy` Contains relevant constants associated with normalization and project hyper-parameters in a dict. 
 - `data_preprocessing.py` All functions associated with preprocessing Delphes and raw CMS data before use. Experimentally concluded _zscore_ and _max pT_ normalization are optimal for Delphes. 

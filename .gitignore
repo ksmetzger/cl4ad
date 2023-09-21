@@ -2,3 +2,6 @@
 Miniconda3-latest-Linux-x86_64.sh
 Plots
 __pycache__
+.*DS_Store
+model_weights/
+plots/
