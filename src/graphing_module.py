@@ -25,7 +25,8 @@ def plot_2D_pca(representations, folder, filename, labels = None, anomaly=None, 
             5.0:"ato4l", 6.0:"hChToTauNu", 7.0:"hToTauTau"}
         anomaly_colors = {0.0:'#00C142', 1.0:'#44CBB7', 2.0:'#4457CB', 3.0:'#8B15E4',
             4.0:'#C01E1E', 5.0:'#1f77b4', 6.0:'#ff7f0e', 7.0:'#2ca02c'}
-        default_colors = {0.0:'#1f77b4', 1.0:'#ff7f0e', 2.0:'#2ca02c', 3.0:'#d62728', 4.0:'#9467bd'}
+        default_colors = {0.0:'#1f77b4', 1.0:'#ff7f0e', 2.0:'#2ca02c', 3.0:'#d62728',
+            4.0:'#C01E1E', 5.0:'#1f77b4', 6.0:'#ff7f0e', 7.0:'#2ca02c'}
 
         # Plots representation per label. If anomaly -> uses special color pallet + opacity
         for label in unique_labels:
@@ -79,7 +80,8 @@ def plot_3D_pca(representations, folder, filename, labels = None, anomaly = None
             5.0:"ato4l", 6.0:"hChToTauNu", 7.0:"hToTauTau"}
         anomaly_colors = {0.0:'#00C142', 1.0:'#44CBB7', 2.0:'#4457CB', 3.0:'#8B15E4',
             4.0:'#C01E1E', 5.0:'#1f77b4', 6.0:'#ff7f0e', 7.0:'#2ca02c'}
-        default_colors = {0.0:'#1f77b4', 1.0:'#ff7f0e', 2.0:'#2ca02c', 3.0:'#d62728', 4.0:'#9467bd'}
+        default_colors = {0.0:'#1f77b4', 1.0:'#ff7f0e', 2.0:'#2ca02c', 3.0:'#d62728',
+            4.0:'#C01E1E', 5.0:'#1f77b4', 6.0:'#ff7f0e', 7.0:'#2ca02c'}
 
         # Plots representation per label. If anomaly -> uses special color pallet + opacity
         for label in unique_labels: 
@@ -154,8 +156,7 @@ def plot_corner_plots(sample_representations, folder, filename, sample_labels, p
 
     max_rep_count = max([len(s) for s in representations])
     num_labels, num_dims = len(representations), representations[0].shape[1]
-    if anomaly == None: colors = ['deeppink', 'lightseagreen', 'red', 'green', 'blueviolet'][::-1]
-    else: colors = ['deeppink', 'lightseagreen', 'gold', 'green', 'blueviolet',
+    colors = ['deeppink', 'lightseagreen', 'gold', 'green', 'blueviolet',
         'salmon', 'red', 'blue', 'orange'][::-1]
 
     plot_range = []
@@ -282,7 +283,8 @@ def plot_tSNE(representations, folder, filename, labels, anomaly = None):
         5.0:"ato4l", 6.0:"hChToTauNu", 7.0:"hToTauTau"}
     anomaly_colors = {0.0:'#00C142', 1.0:'#44CBB7', 2.0:'#4457CB', 3.0:'#8B15E4',
         4.0:'#C01E1E', 5.0:'#1f77b4', 6.0:'#ff7f0e', 7.0:'#2ca02c'}
-    default_colors = {0.0:'#1f77b4', 1.0:'#ff7f0e', 2.0:'#2ca02c', 3.0:'#d62728', 4.0:'#9467bd'}
+    default_colors = {0.0:'#1f77b4', 1.0:'#ff7f0e', 2.0:'#2ca02c', 3.0:'#d62728',
+        4.0:'#C01E1E', 5.0:'#1f77b4', 6.0:'#ff7f0e', 7.0:'#2ca02c'}
 
     # Iterate over unique labels and plot associated data 
     for label in unique_labels: 

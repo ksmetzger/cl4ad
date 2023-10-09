@@ -51,7 +51,7 @@ def test_main(args):
 
         print("==============================")
         print("MAKING RELEVANT TRAINING PLOTS")
-        test_representation, _, _ = encoder.predict(features_test)
+        test_representation, _, _ = CVAE.encoder.predict(features_test)
         graphing_module.plot_2D_pca(test_representation, folder, f'1_2D_PCA.png', labels=labels_test)
         graphing_module.plot_3D_pca(test_representation, folder, f'1_3D_PCA.png', labels=labels_test)
         graphing_module.plot_corner_plots(test_representation, folder, f'1_Latent_Corner_Plots.png',
@@ -94,7 +94,7 @@ if __name__ == '__main__':
     parser.add_argument('--subset-data-name', type=str, default='zscore.npz')
 
     parser.add_argument('--latent-dim', type=int, default=6)
-    parser.add_argument('--epochs', type=int, default=20)
+    parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--batch-size', type=int, default=25)
     parser.add_argument('--learning-rate', type=float, default=0.031)
     parser.add_argument('--loss-temp', type=float, default=0.07)
