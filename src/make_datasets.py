@@ -40,11 +40,11 @@ def make_montecarlo_dataset(sample_size, anomaly_size, new_filename, divisions, 
     # Extract sample_size samples from relevant files
     np.random.shuffle(train_ix)
     x_train = data['x_train'][train_ix]
-    x_test  = data['x_test']
-    x_val   = data['x_val']
+    x_test  = data['x_test'][:sample_size]
+    x_val   = data['x_val'][:sample_size]
     id_train = tf.reshape(labels['background_ID_train'][train_ix], (-1, 1))
-    id_test = tf.reshape(labels['background_ID_test'], (-1, 1))
-    id_val  = tf.reshape(labels['background_ID_val'], (-1, 1))
+    id_test = tf.reshape(labels['background_ID_test'][:sample_size], (-1, 1))
+    id_val  = tf.reshape(labels['background_ID_val'][:sample_size], (-1, 1))
 
     anomaly_dataset = np.load('/eos/home-e/egovorko/kd_data/bsm_datasets_-1.npz')
 

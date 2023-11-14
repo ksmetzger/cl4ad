@@ -6,3 +6,7 @@ __pycache__
 model_weights/
 plots/
 data/
+.ipynb_checkpoints/
+src/._*
+src/*.pdf
+src/Data/

@@ -15,14 +15,25 @@ import data_preprocessing
 
 class Train_Encoder(kt.HyperModel):
     def build(self, hp): 
-        latent_dim = hp.Int("latent_dim", min_value=5, max_value=8, step=1)
-        learning_rate = hp.Float("learing_rate", min_value = 0.001, max_value = 0.051, step = 0.01)
-        CVAE = models.CVAE(losses.SimCLRLoss, temp=0.07, latent_dim=latent_dim)
-        CVAE.compile(optimizer=keras.optimizers.Adam(learning_rate=learning_rate, amsgrad=True))
+        layers_number = hp.Int("layers_number", min_value=1, max_value=5, step=1)
+        layers_size = []
+        for l in range(5):
+            layers_size.append(hp.Int(f"layer_size_{l}", min_value=32, max_value=128, step=32))
+        layer_size_projection = hp.Int(f"layer_size_projection", min_value=16, max_value=64, step=16)
+        latent_dim = hp.Int("latent_dim", min_value=2, max_value=14, step=4)
+
+        CVAE = models.CVAE(losses.SimCLRLoss,
+            temp=0.07,
+            latent_dim=latent_dim,
+            layers_number=layers_number,
+            layers_size=layers_size,
+            layer_size_projection=layer_size_projection
+            )
+        CVAE.compile(optimizer='adam') #keras.optimizers.Adam(learning_rate=learning_rate, amsgrad=True))
         return CVAE
 
     def fit(self, hp, model, *args, **kwargs): 
-        batch_size = hp.Int("batch_size", min_value=20, max_value=1020, step=100)
+        batch_size = hp.Int("batch_size", min_value=24, max_value=1024, step=100)
         return model.fit(*args, batch_size=batch_size, **kwargs)
 
 class Train_Classifier(kt.HyperModel): 
@@ -37,9 +48,10 @@ class Train_Classifier(kt.HyperModel):
         batch_size = hp.Int("batch_size", min_value=32, max_value=1020, step=100)
         return classifier.fit(*args, batch_size=batch_size, **kwargs) 
     
+
 if __name__ == '__main__':
-    train_search = False 
-    
+
+    train_search = True
     if train_search: 
         features_dataset = np.load('../data/zscore.npz')
         features_train = features_dataset['x_train']
@@ -49,15 +61,26 @@ if __name__ == '__main__':
         labels_test = tf.reshape(features_dataset['labels_test'], (-1, 1))
         labels_valid = tf.reshape(features_dataset['labels_val'], (-1, 1))                       
         tuner = kt.RandomSearch(
-            MyHyperModel(),
-            kt.Objective("contrastive_loss", direction="min"),
-            max_trials=3,
+            Train_Encoder(),
+            kt.Objective("val_contrastive_tracker", direction="min"),
+            max_trials=100,
             overwrite=True,
             directory="Data",
             project_name="tune_hypermodel")
 
-        tuner.search(features_train, labels_train, epochs=10)
+        tuner.search_space_summary()
+
+        tuner.search(features_train, labels_train,
+            epochs=10,
+            validation_data=(features_valid, labels_valid))
         
+        models = tuner.get_best_models(num_models=2)
+        best_model = models[0]
+        best_model.build(input_shape=(None, 57))
+        best_model.summary()
+
+        tuner.results_summary()
+
     else: 
         encoder = models.build_encoder(6)
         encoder.load_weights("../model_weights/" + 'zscore.h5')

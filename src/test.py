@@ -13,6 +13,7 @@ import losses
 import graphing_module
 from argparse import ArgumentParser
 from tensorflow.keras.callbacks import (EarlyStopping, ReduceLROnPlateau)
+import matplotlib.pyplot as plt
 
 def test_main(args):
     '''Infastructure for training and plotting CVAE (background specific and with anomalies)'''
@@ -28,13 +29,18 @@ def test_main(args):
     labels_test = tf.reshape(features_dataset['labels_test'], (-1, 1))
     labels_val = tf.reshape(features_dataset['labels_val'], (-1, 1))
 
+    for name, arr in zip(['x_train','x_test','x_val'], [features_train,features_test,features_val]):
+        print(name, np.unique(arr, return_counts=True))
+    for name, arr in zip(['labels_train','labels_test','labels_val'], [labels_train,labels_test,labels_val]):
+        print(name, np.unique(arr, return_counts=True))
+
     if args.train:
         # Creates CVAE and trains on training data. Saves encoder
         print("=============================")
         print("MAKING AND TRAINING THE MODEL")
         callbacks = [EarlyStopping(monitor='contrastive_loss', patience=10, verbose=1)]
         CVAE = models.CVAE(losses.SimCLRLoss, temp=args.loss_temp, latent_dim=args.latent_dim)
-        CVAE.compile(optimizer=keras.optimizers.Adam(learning_rate=args.learning_rate, amsgrad=True))
+        CVAE.compile(optimizer='adam')
         history = CVAE.fit(features_train, labels_train, epochs=args.epochs, batch_size=args.batch_size, callbacks=callbacks,
                            validation_data=(features_val, labels_val))
         subfolder = os.path.join(os.path.dirname(__file__), '..', 'model_weights')
@@ -47,17 +53,42 @@ def test_main(args):
         np.save('../data/zscore_rep.npy', test_representation)
 
     if args.plot:
-        folder = f"{args.epochs}_BatchSize_{args.batch_size}_LearningRate_{args.learning_rate}_Temp_{args.loss_temp}_LatentDim_{args.latent_dim}"
+        encoder = models.build_encoder(args.latent_dim, 2, [64, 32])
+        encoder.load_weights("../model_weights/" + args.encoder_name)
+
+        folder = f"Epochs_{args.epochs}_BatchSize_{args.batch_size}_LatentDim_{args.latent_dim}"
 
         print("==============================")
         print("MAKING RELEVANT TRAINING PLOTS")
-        test_representation, _, _ = CVAE.encoder.predict(features_test)
-        graphing_module.plot_2D_pca(test_representation, folder, f'1_2D_PCA.png', labels=labels_test)
-        graphing_module.plot_3D_pca(test_representation, folder, f'1_3D_PCA.png', labels=labels_test)
-        graphing_module.plot_corner_plots(test_representation, folder, f'1_Latent_Corner_Plots.png',
-                                          labels_test, plot_pca=False)
-        graphing_module.plot_corner_plots(test_representation, folder, f'1_PCA_Corner_Plots.png',
-            labels_test, plot_pca=True)
+        test_representation, _, _ = encoder.predict(features_test)
+        # plt.plot(test_representation[:,0],test_representation[:,1], labels=labels_test)
+
+        unique_labels = np.unique(labels_test)
+        name_mappings = {0.0:"W-Boson", 1.0:"QCD", 2.0:"Z_2", 3.0:"tt", 4.0:"leptoquark",
+            5.0:"ato4l", 6.0:"hChToTauNu", 7.0:"hToTauTau"}
+        anomaly_colors = {0.0:'#00C142', 1.0:'#44CBB7', 2.0:'#4457CB', 3.0:'#8B15E4',
+            4.0:'#C01E1E', 5.0:'#1f77b4', 6.0:'#ff7f0e', 7.0:'#2ca02c'}
+        default_colors = {0.0:'#1f77b4', 1.0:'#ff7f0e', 2.0:'#2ca02c', 3.0:'#d62728',
+            4.0:'#C01E1E', 5.0:'#1f77b4', 6.0:'#ff7f0e', 7.0:'#2ca02c'}
+
+        # Plots representation per label. If anomaly -> uses special color pallet + opacity
+        for label in unique_labels:
+            name = name_mappings[label]
+            indices = np.where(labels_test == label)[0]
+            if label < 4.0: alpha, color = 0.025, anomaly_colors[label]
+            else: alpha, color = 0.0125, anomaly_colors[label]
+            plt.scatter(test_representation[indices, 0], test_representation[indices, 1], label=name, alpha=0.05, c=color, s=0.7)
+
+        leg = plt.legend(markerscale = 3.0, loc='upper right')
+        for lh in leg.legendHandles: lh.set_alpha(1)
+        plt.savefig('plot.pdf')
+
+        # graphing_module.plot_2D_pca(test_representation, folder, f'1_2D_PCA.png', labels=labels_test)
+        # graphing_module.plot_3D_pca(test_representation, folder, f'1_3D_PCA.png', labels=labels_test)
+        # graphing_module.plot_corner_plots(test_representation, folder, f'1_Latent_Corner_Plots.png',
+        #                                   labels_test, plot_pca=False)
+        # graphing_module.plot_corner_plots(test_representation, folder, f'1_PCA_Corner_Plots.png',
+        #     labels_test, plot_pca=True)
 
     if args.train_nf:
 
@@ -93,10 +124,10 @@ if __name__ == '__main__':
     # If not using full data, name of smaller dataset to pull from
     parser.add_argument('--subset-data-name', type=str, default='zscore.npz')
 
-    parser.add_argument('--latent-dim', type=int, default=6)
+    parser.add_argument('--latent-dim', type=int, default=2)
     parser.add_argument('--epochs', type=int, default=50)
-    parser.add_argument('--batch-size', type=int, default=25)
-    parser.add_argument('--learning-rate', type=float, default=0.031)
+    parser.add_argument('--batch-size', type=int, default=24)
+    parser.add_argument('--learning-rate', type=float, default=0.003)
     parser.add_argument('--loss-temp', type=float, default=0.07)
     parser.add_argument('--encoder-name', type=str, default='zscore.h5')
 
