@@ -9,4 +9,6 @@ data/
 .ipynb_checkpoints/
 src/._*
 src/*.pdf
-src/Data/
+output
+deep/
+.snakemake/
