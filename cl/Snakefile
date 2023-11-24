@@ -20,8 +20,10 @@ rule train_cl:
     input:
         data = rules.make_datasets.output.dataset
     output:
+        model = 'output/vae.pth'
     shell:
-        'python src/cl/train.py'
+        'python src/cl/train.py {input.data} \
+            --encoder-name {output.model} '
 
 rule train_nf:
     input:
