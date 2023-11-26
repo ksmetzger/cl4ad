@@ -8,7 +8,7 @@ from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA 
 from sklearn.metrics import roc_curve, auc
 
-def plot_2D_pca(representations, folder, filename, labels = None, anomaly=None, specs=None): 
+def plot_2D_pca(representations, folder, filename, labels=None, anomaly=None, specs=None):
     '''
     Plots 2D PCA of representations and saves file at filename location 
     Labels: Provided in supervised case -> PCA color coded by labels 

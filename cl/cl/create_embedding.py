@@ -32,11 +32,11 @@ def main(args):
 
         for batch_idx, data in enumerate(dataloader):
             if batch_idx==0:
-                embedding = model.representation(data[0])
+                embedding = model.representation(data[0]).cpu().detach().numpy()
             else:
-                torch.cat((embedding, model.representation(data[0])))
+                embedding = np.concatenate((embedding, model.representation(data[0]).cpu().detach().numpy() ))
 
-        return features_train.cpu().detach().numpy(), embedding.cpu().detach().numpy(), labels_train
+        return features_train.cpu().detach().numpy(), embedding, labels_train
 
     datasets = dict()
     for features_name in ['x_train','x_test','x_val']:
