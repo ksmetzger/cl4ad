@@ -30,16 +30,22 @@ class CVAE(torch.nn.Module):
         )
 
 
-    def reparametrize(self, mu, logvar):
-        std = logvar.mul(0.5).exp_()
+    def reparameterize(self, mu, logvar):
+        """
+        Will a single z be enough ti compute the expectation
+        for the loss??
+        :param mu: (Tensor) Mean of the latent Gaussian
+        :param logvar: (Tensor) Standard deviation of the latent Gaussian
+        :return:
+        """
+        std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
-
-        return eps.mul(std).add_(mu)
+        return eps * std + mu
 
     def representation(self, x):
         x = self.mlp(x)
         mu, logvar = self.z_mean(x), self.z_log_var(x)
-        z = self.reparametrize(mu, logvar)
+        z = self.reparameterize(mu, logvar)
 
         return z
 

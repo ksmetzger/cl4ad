@@ -9,7 +9,7 @@ rule make_datasets:
         scaling = 'output/scaling.npz',
         dataset = 'output/dataset.npz'
     shell:
-        'python src/data/make_datasets.py {params.bkg} {params.bkg_ids} {params.anomaly} \
+        'python data/make_datasets.py {params.bkg} {params.bkg_ids} {params.anomaly} \
             --scaling-file {output.scaling} \
             --divisions {params.divisions} \
             --output-filename {output.dataset} \
@@ -22,14 +22,25 @@ rule train_cl:
     output:
         model = 'output/vae.pth'
     shell:
-        'python src/cl/train.py {input.data} \
-            --encoder-name {output.model} '
+        'python cl/train.py {input.data} \
+            --model-name {output.model} '
+
+rule create_embedding:
+    input:
+        data = rules.make_datasets.output.dataset,
+        model = rules.train_cl.output.model
+    output:
+        embedding = 'output/embedding.npz'
+    shell:
+        'python cl/create_embedding.py {input.data} \
+            --pretrained-model {input.model} \
+            --output-filename {output.embedding} '
 
 rule train_nf:
     input:
     output:
     shell:
-        'python src/nf/train.py'
+        'python nf/train.py'
 
 rule plot:
     input:

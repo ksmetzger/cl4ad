@@ -7,12 +7,11 @@ import torch.nn.functional as F
 class SimCLRLoss(nn.Module):
     """Supervised Contrastive Learning: https://arxiv.org/pdf/2004.11362.pdf.
     It also supports the unsupervised contrastive loss in SimCLR"""
-    def __init__(self, temperature=0.07, base_temperature=0.07):
+    def __init__(self, temperature=0.07):
         super().__init__()
         self.temperature = temperature
-        self.base_temperature = base_temperature
 
-    def forward(self, features, labels=None):
+    def forward(self, features, labels):
         """Compute loss for model. If both `labels` and `mask` are None,
         it degenerates to SimCLR unsupervised loss:
         https://arxiv.org/pdf/2002.05709.pdf
@@ -33,18 +32,20 @@ class SimCLRLoss(nn.Module):
         if labels.shape[0] != batch_size:
             raise ValueError('Num of labels does not match num of features')
         mask = torch.eq(labels, labels.T).float().to(device)
+        logits_mask = torch.logical_not(mask).float()
 
-        contrast_count = features.shape[1]
-        contrast_feature = features #torch.cat(torch.unbind(features, dim=1), dim=0)
+        # contrast_count = features.shape[1]
+        # contrast_feature = features #torch.cat(torch.unbind(features, dim=1), dim=0)
 
         # compute logits
-        anchor_dot_contrast = torch.div(
-            torch.matmul(features, contrast_feature.T),
+        # logits = torch.matmul(features, features.T)
+        logits = torch.div(
+            torch.matmul(features, features.T),
             self.temperature)
 
         # for numerical stability
-        logits_max, _ = torch.max(anchor_dot_contrast, dim=1, keepdim=True)
-        logits = anchor_dot_contrast - logits_max.detach()
+        logits_max, _ = torch.max(logits, dim=1, keepdim=True)
+        logits = logits - logits_max.detach()
 
         # tile mask
         # mask = mask.repeat(1, contrast_count)
@@ -58,15 +59,18 @@ class SimCLRLoss(nn.Module):
         # mask = mask * logits_mask
 
         # compute log_prob
-        exp_logits = torch.exp(logits)  #* logits_mask
+        exp_logits = torch.exp(logits) * logits_mask
+        exp_logits += torch.exp(logits) * mask
         log_prob = logits - torch.log(exp_logits.sum(1, keepdim=True))
 
         # compute mean of log-likelihood over positive
         mean_log_prob_pos = (mask * log_prob).sum(1) / mask.sum(1)
 
         # loss
-        loss = - (self.temperature / self.base_temperature) * mean_log_prob_pos
-        loss = loss.view(1, batch_size).mean()
+        loss = - self.temperature * mean_log_prob_pos
+
+        loss = loss.view(1, batch_size).float().mean()
+
         return loss
 
 

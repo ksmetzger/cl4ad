@@ -6,7 +6,7 @@ from tensorflow import keras
 from tensorflow.keras import activations
 
 # Contrastive Loss Function
-def SimCLRLoss(features, labels, temperature = 0.07):
+def SimCLRLoss(features, labels, temperature=0.07):
     '''
     Computes SimCLRLoss as defined in https://arxiv.org/pdf/2004.11362.pdf
     '''

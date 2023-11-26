@@ -1,67 +1,55 @@
-import os
-import sys
 import numpy as np
 from argparse import ArgumentParser
 import matplotlib.pyplot as plt
 
 import torch
-from torch.utils.data import (
-    Dataset,
-    DataLoader,
-    TensorDataset
-    )
-import models
+from torch.utils.data import DataLoader
+from torchsummary import summary
+
 import losses
-
-class Dataset(Dataset):
-  'Characterizes a dataset for PyTorch'
-  def __init__(self, features, labels):
-        'Initialization'
-        self.features = features
-        self.labels = labels
-
-  def __len__(self):
-        'Denotes the total number of samples'
-        return len(self.features)
-
-  def __getitem__(self, index):
-        'Generates one sample of data'
-        # Load data and get label
-        X = self.features[index]
-        y = self.labels[index]
-
-        return X, y
+from models import CVAE
+from dataset import CLDataset
 
 def main(args):
     '''
     Infastructure for training CVAE (background specific and with anomalies)
     '''
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    print(f"Using {device}")
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    print(f'Using {device}')
 
     features_dataset = np.load(args.dataset_filename)
 
     features_train = torch.from_numpy(features_dataset['x_train']).to(dtype=torch.float32, device=device)
-    features_test =  torch.from_numpy(features_dataset['x_test']).to(dtype=torch.float32, device=device)
-    features_val =  torch.from_numpy(features_dataset['x_val']).to(dtype=torch.float32, device=device)
-    labels_train =  torch.from_numpy(features_dataset['labels_train']).to(dtype=torch.float32, device=device)
-    labels_test = torch.from_numpy(features_dataset['labels_test']).to(dtype=torch.float32, device=device)
-    labels_val = torch.from_numpy(features_dataset['labels_val']).to(dtype=torch.float32, device=device)
+    labels_train = torch.from_numpy(features_dataset['labels_train']).to(dtype=torch.float32, device=device)
+    train_set = CLDataset(features_train, labels_train)
 
-    train_set = Dataset(features_train, labels_train)
+    features_val = torch.from_numpy(features_dataset['x_val']).to(dtype=torch.float32, device=device)
+    labels_val = torch.from_numpy(features_dataset['labels_val']).to(dtype=torch.float32, device=device)
+    val_set = CLDataset(features_val, labels_val)
 
     dataloader = DataLoader(
         train_set,
         batch_size=args.batch_size,
         shuffle=False)
 
-    model = models.CVAE().to(device)
+    valloader = DataLoader(
+        val_set,
+        batch_size=args.batch_size,
+        shuffle=False)
+
+    model = CVAE().to(device)
+    summary(model, input_size=(57,))
+
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min')
     criterion = losses.SimCLRLoss()
 
+    train_losses = []
+    val_losses = []
     for epoch in range(args.epochs):
-        train_loss = 0
+        model.train(True)
+        step_loss = []
         for batch_idx, data in enumerate(dataloader):
 
             # get the inputs; data is a list of [inputs, labels]
@@ -76,14 +64,34 @@ def main(args):
             loss.backward()
             optimizer.step()
 
-            train_loss += loss.item()
+            step_loss.append(loss.item())
+        # Set the model to evaluation mode, disabling dropout and using population
+        # statistics for batch normalization.
+        step_vloss = []
+        model.eval()
+        # Disable gradient computation and reduce memory consumption.
+        with torch.no_grad():
+            for i, vdata in enumerate(valloader):
+                vinputs, vlabels = vdata
+                voutputs = model(vinputs)
+                vloss = criterion(voutputs, vlabels)
+                step_vloss.append(vloss.item())
 
-            if batch_idx % 1000 == 0:
-                print(f'Train Epoch: {epoch} [{batch_idx}/{len(dataloader.dataset)} ({100*batch_idx / len(dataloader):.0f}%)]\nLoss: {loss.item():.6f}')
+        train_losses.append(np.array(step_loss).mean())
+        val_losses.append(np.array(step_vloss).mean())
+        print(f'====> Epoch: {epoch} Average train loss: {np.array(step_loss).mean():.4f} val loss {np.array(step_vloss).mean():.4f}')
 
-        print(f'====> Epoch: {epoch} Average loss: {train_loss / len(dataloader.dataset):.4f}')
+        # reduce LR on plateu
+        scheduler.step(np.array(step_vloss).mean())
 
-    torch.save(model.state_dict(), args.encoder_name)
+    plt.plot(train_losses, label='train')
+    plt.plot(val_losses, label='val')
+    plt.xlabel('iterations')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.savefig('output/loss.pdf')
+
+    torch.save(model.state_dict(), args.model_name)
 
 
 if __name__ == '__main__':
@@ -93,10 +101,10 @@ if __name__ == '__main__':
     # If not using full data, name of smaller dataset to pull from
     parser.add_argument('dataset_filename', type=str)
 
-    parser.add_argument('--epochs', type=int, default=50)
+    parser.add_argument('--epochs', type=int, default=200)
     parser.add_argument('--batch-size', type=int, default=1024)
     parser.add_argument('--loss-temp', type=float, default=0.07)
-    parser.add_argument('--encoder-name', type=str, default='output/vae.pth')
+    parser.add_argument('--model-name', type=str, default='output/vae.pth')
 
     args = parser.parse_args()
     main(args)
