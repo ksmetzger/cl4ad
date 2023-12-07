@@ -5,8 +5,10 @@ import torch.nn.functional as F
 
 # Simplified implemented from https://github.com/violatingcp/codec/blob/main/losses.py
 class SimCLRLoss(nn.Module):
-    """Supervised Contrastive Learning: https://arxiv.org/pdf/2004.11362.pdf.
-    It also supports the unsupervised contrastive loss in SimCLR"""
+    """
+    Supervised Contrastive Learning: https://arxiv.org/pdf/2004.11362.pdf.
+    It also supports the unsupervised contrastive loss in SimCLR
+    """
     def __init__(self, temperature=0.07):
         super().__init__()
         self.temperature = temperature
@@ -34,11 +36,6 @@ class SimCLRLoss(nn.Module):
         mask = torch.eq(labels, labels.T).float().to(device)
         logits_mask = torch.logical_not(mask).float()
 
-        # contrast_count = features.shape[1]
-        # contrast_feature = features #torch.cat(torch.unbind(features, dim=1), dim=0)
-
-        # compute logits
-        # logits = torch.matmul(features, features.T)
         logits = torch.div(
             torch.matmul(features, features.T),
             self.temperature)
@@ -46,17 +43,6 @@ class SimCLRLoss(nn.Module):
         # for numerical stability
         logits_max, _ = torch.max(logits, dim=1, keepdim=True)
         logits = logits - logits_max.detach()
-
-        # tile mask
-        # mask = mask.repeat(1, contrast_count)
-        # mask-out self-contrast cases
-        # logits_mask = torch.scatter(
-        #     torch.ones_like(mask),
-        #     1,
-        #     torch.arange(batch_size * contrast_count).view(-1, 1).to(device),
-        #     0
-        # )
-        # mask = mask * logits_mask
 
         # compute log_prob
         exp_logits = torch.exp(logits) * logits_mask

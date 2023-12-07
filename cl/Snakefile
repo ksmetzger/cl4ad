@@ -1,5 +1,4 @@
-rule make_datasets:
-    input:
+rule train_cl:
     params:
         bkg = '/eos/home-e/egovorko/kd_data/datasets_-1.npz',
         bkg_ids = '/eos/home-e/egovorko/kd_data/background_IDs_-1.npz',
@@ -7,34 +6,13 @@ rule make_datasets:
         divisions = [0.30, 0.30, 0.20, 0.20]
     output:
         scaling = 'output/scaling.npz',
-        dataset = 'output/dataset.npz'
-    shell:
-        'python data/make_datasets.py {params.bkg} {params.bkg_ids} {params.anomaly} \
-            --scaling-file {output.scaling} \
-            --divisions {params.divisions} \
-            --output-filename {output.dataset} \
-            --sample-size -1 \
-            --anomaly-size -1 '
-
-rule train_cl:
-    input:
-        data = rules.make_datasets.output.dataset
-    output:
+        dataset = 'output/embedding.npz',
         model = 'output/vae.pth'
     shell:
-        'python cl/train.py {input.data} \
-            --model-name {output.model} '
-
-rule create_embedding:
-    input:
-        data = rules.make_datasets.output.dataset,
-        model = rules.train_cl.output.model
-    output:
-        embedding = 'output/embedding.npz'
-    shell:
-        'python cl/create_embedding.py {input.data} \
-            --pretrained-model {input.model} \
-            --output-filename {output.embedding} '
+        'python cl/train.py {params.bkg} {params.bkg_ids} {params.anomaly} \
+            --model-name {output.model} \
+            --scaling-file {output.scaling} \
+            --output-filename {output.dataset} '
 
 rule train_nf:
     input:
