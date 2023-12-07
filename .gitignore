@@ -5,7 +5,6 @@ __pycache__
 .*DS_Store
 model_weights/
 plots/
-data/
 .ipynb_checkpoints/
 src/._*
 src/*.pdf
