@@ -101,9 +101,9 @@ class CLBackgroundDataset:
 
     def save(self, filename, model):
         # Create and save new .npz with extracted features. Reports success
-        self.scaled_dataset['embedding_train'] = model(self.scaled_dataset['x_train'].reshape((-1,1,6)))
-        self.scaled_dataset['embedding_test'] = model(self.scaled_dataset['x_test'].reshape((-1,1,6)))
-        self.scaled_dataset['embedding_val'] = model(self.scaled_dataset['x_val'].reshape((-1,1,6)))
+        self.scaled_dataset['embedding_train'] = model.representation(self.scaled_dataset['x_train'].reshape((-1,1,6))).cpu().detach().numpy()
+        self.scaled_dataset['embedding_test'] = model.representation(self.scaled_dataset['x_test'].reshape((-1,1,6))).cpu().detach().numpy()
+        self.scaled_dataset['embedding_val'] = model.representation(self.scaled_dataset['x_val'].reshape((-1,1,6))).cpu().detach().numpy()
 
         np.savez(filename, **self.scaled_dataset)
         print(f'{filename} successfully saved')
@@ -177,7 +177,7 @@ class CLSignalDataset:
         # Create and save new .npz with extracted features. Reports success
         for k in self.scaled_dataset.keys():
             if 'label' not in k:
-                self.scaled_dataset['embedding_{k}'] = model(self.scaled_dataset[k].reshape((-1,1,6)))
+                self.scaled_dataset['embedding_{k}'] = model.representation(self.scaled_dataset[k].reshape((-1,1,6))).cpu().detach().numpy()
 
         np.savez(filename, **self.scaled_dataset)
         print(f'{filename} successfully saved')

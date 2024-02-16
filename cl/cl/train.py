@@ -31,6 +31,11 @@ def main(args):
         batch_size=args.batch_size,
         shuffle=False)
 
+    test_data_loader = DataLoader(
+        TorchCLDataset(dataset.x_test, dataset.labels_test, device),
+        batch_size=args.batch_size,
+        shuffle=False)
+
     val_data_loader = DataLoader(
         TorchCLDataset(dataset.x_val, dataset.labels_val, device),
         batch_size=args.batch_size,
@@ -75,7 +80,6 @@ def main(args):
             running_sim_loss += similar_embedding_loss.item()
             if idx % 500 == 0:
                 last_sim_loss = running_sim_loss / 500
-                print(' Avg. train loss/batch after {} batches = {:.4f}'.format(idx, last_sim_loss))
                 tb_x = epoch_index * len(train_data_loader) + idx
                 tb_writer.add_scalar('SimLoss/train', last_sim_loss, tb_x)
                 running_sim_loss = 0.
@@ -108,25 +112,26 @@ def main(args):
         tb_writer.flush()
         return last_sim_loss
 
-    writer = SummaryWriter("hep_sim_together_round_2", comment="Similarity with LR=1e-3", flush_secs=5)
+    writer = SummaryWriter("output/results", comment="Similarity with LR=1e-3", flush_secs=5)
 
-    train_losses = []
-    val_losses = []
-    for epoch in range(1, args.epochs+1):
-        print(f'EPOCH {epoch}')
-        # Gradient tracking
-        model.train(True)
-        avg_train_loss = train_one_epoch(epoch, writer)
-        train_losses.append(avg_train_loss)
+    if args.train:
+        train_losses = []
+        val_losses = []
+        for epoch in range(1, args.epochs+1):
+            print(f'EPOCH {epoch}')
+            # Gradient tracking
+            model.train(True)
+            avg_train_loss = train_one_epoch(epoch, writer)
+            train_losses.append(avg_train_loss)
 
-        # no gradient tracking, for validation
-        model.train(False)
-        avg_val_loss = val_one_epoch(epoch, writer)
-        val_losses.append(avg_val_loss)
+            # no gradient tracking, for validation
+            model.train(False)
+            avg_val_loss = val_one_epoch(epoch, writer)
+            val_losses.append(avg_val_loss)
 
-        print(f"Train/Val Sim Loss after epoch: {avg_train_loss:.4f}/{avg_val_loss:.4f}")
+            print(f"Train/Val Sim Loss after epoch: {avg_train_loss:.4f}/{avg_val_loss:.4f}")
 
-        scheduler.step()
+            scheduler.step()
 
     plt.plot(train_losses, label='train')
     plt.plot(val_losses, label='val')
@@ -138,6 +143,8 @@ def main(args):
     dataset.save(args.output_filename, model)
     torch.save(model.state_dict(), args.model_name)
 
+    CLSignalDataset(args.anomaly_dataset, preprocess=args.scaling_filename).save(f'anomalies_embedding.npz', model)
+
 
 if __name__ == '__main__':
     # Parses terminal command
@@ -148,14 +155,15 @@ if __name__ == '__main__':
     parser.add_argument('background_ids', type=str)
     parser.add_argument('anomaly_dataset', type=str)
 
-    parser.add_argument('--epochs', type=int, default=5)
+    parser.add_argument('--epochs', type=int, default=1)
     parser.add_argument('--batch-size', type=int, default=1024)
     parser.add_argument('--loss-temp', type=float, default=0.07)
     parser.add_argument('--model-name', type=str, default='output/vae.pth')
     parser.add_argument('--scaling-filename', type=str)
-    parser.add_argument('--output-filename', type=str, default='output/data.npz')
+    parser.add_argument('--output-filename', type=str, default='output/embedding.npz')
     parser.add_argument('--sample-size', type=int, default=-1)
     parser.add_argument('--mix-in-anomalies', action='store_true')
+    parser.add_argument('--train', action='store_true')
 
     args = parser.parse_args()
     main(args)

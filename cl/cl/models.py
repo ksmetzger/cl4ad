@@ -3,6 +3,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
+
 class CVAE(torch.nn.Module):
     '''
     Creates fully supervised CVAE Class
@@ -38,6 +41,10 @@ class CVAE(torch.nn.Module):
         :param logvar: (Tensor) Standard deviation of the latent Gaussian
         :return:
         """
+        if type(mu)==np.ndarray:
+            mu = torch.from_numpy(mu).to(dtype=torch.float32, device=DEVICE)
+            logvar = torch.from_numpy(logvar).to(dtype=torch.float32, device=DEVICE)
+
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         return eps * std + mu

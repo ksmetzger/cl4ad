@@ -9,16 +9,17 @@ rule train_cl:
         dataset = 'output/embedding.npz',
         model = 'output/vae.pth'
     shell:
-        'python cl/train.py {params.bkg} {params.bkg_ids} {params.anomaly} \
+        'python3 cl/train.py {params.bkg} {params.bkg_ids} {params.anomaly} \
             --model-name {output.model} \
             --scaling-file {output.scaling} \
-            --output-filename {output.dataset} '
+            --output-filename {output.dataset} \
+            --train '
 
 rule train_nf:
     input:
     output:
     shell:
-        'python nf/train.py'
+        'python3 nf/train.py'
 
 rule plot:
     input:
