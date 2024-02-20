@@ -76,7 +76,7 @@ class TorchCLDataset(Dataset):
 
 class CLBackgroundDataset:
     'Characterizes a dataset for PyTorch'
-    def __init__(self, data_filename, labels_filename, preprocess=True, n_events=-1, divisions=[1,1,1,1]):
+    def __init__(self, data_filename, labels_filename, preprocess=True, n_events=-1, divisions=[1,1,1,1], device=None):
         'Initialization'
         self.data = np.load(data_filename, mmap_mode='r')
         self.labels = np.load(labels_filename, mmap_mode='r')
@@ -99,11 +99,19 @@ class CLBackgroundDataset:
         self.labels_test = self.scaled_dataset['labels_test']
         self.labels_val = self.scaled_dataset['labels_val']
 
+        self.device = device
+
     def save(self, filename, model):
         # Create and save new .npz with extracted features. Reports success
-        self.scaled_dataset['embedding_train'] = model.representation(self.scaled_dataset['x_train'].reshape((-1,1,6))).cpu().detach().numpy()
-        self.scaled_dataset['embedding_test'] = model.representation(self.scaled_dataset['x_test'].reshape((-1,1,6))).cpu().detach().numpy()
-        self.scaled_dataset['embedding_val'] = model.representation(self.scaled_dataset['x_val'].reshape((-1,1,6))).cpu().detach().numpy()
+        self.scaled_dataset['embedding_train'] = model.representation(
+                torch.from_numpy(self.scaled_dataset['x_train']
+                    ).to(dtype=torch.float32, device=self.device)).cpu().detach().numpy()
+        self.scaled_dataset['embedding_test'] = model.representation(
+                torch.from_numpy(self.scaled_dataset['x_test']
+                    ).to(dtype=torch.float32, device=self.device)).cpu().detach().numpy()
+        self.scaled_dataset['embedding_val'] = model.representation(
+                torch.from_numpy(self.scaled_dataset['x_val']
+                    ).to(dtype=torch.float32, device=self.device)).cpu().detach().numpy()
 
         np.savez(filename, **self.scaled_dataset)
         print(f'{filename} successfully saved')

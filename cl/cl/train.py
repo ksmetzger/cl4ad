@@ -22,7 +22,8 @@ def main(args):
 
     dataset = CLBackgroundDataset(args.background_dataset, args.background_ids,
         preprocess=args.scaling_filename,
-        divisions=[0.30, 0.30, 0.20, 0.20]
+        divisions=[0.30, 0.30, 0.20, 0.20],
+        device=device
     )
     dataset.report_specs()
 
@@ -133,6 +134,11 @@ def main(args):
 
             scheduler.step()
 
+        torch.save(model.state_dict(), args.model_name)
+    else:
+        model.load_state_dict(torch.load(args.model_name))
+        model.eval()
+
     plt.plot(train_losses, label='train')
     plt.plot(val_losses, label='val')
     plt.xlabel('iterations')
@@ -141,7 +147,6 @@ def main(args):
     plt.savefig('output/loss.pdf')
 
     dataset.save(args.output_filename, model)
-    torch.save(model.state_dict(), args.model_name)
 
     CLSignalDataset(args.anomaly_dataset, preprocess=args.scaling_filename).save(f'anomalies_embedding.npz', model)
 

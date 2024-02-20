@@ -3,14 +3,14 @@ rule train_cl:
         bkg = '/eos/home-e/egovorko/kd_data/datasets_-1.npz',
         bkg_ids = '/eos/home-e/egovorko/kd_data/background_IDs_-1.npz',
         anomaly = '/eos/home-e/egovorko/kd_data/bsm_datasets_-1.npz',
-        divisions = [0.30, 0.30, 0.20, 0.20]
+        divisions = [0.30, 0.30, 0.20, 0.20],
+        model = 'output/vae.pth'
     output:
         scaling = 'output/scaling.npz',
         dataset = 'output/embedding.npz',
-        model = 'output/vae.pth'
     shell:
         'python3 cl/train.py {params.bkg} {params.bkg_ids} {params.anomaly} \
-            --model-name {output.model} \
+            --model-name {params.model} \
             --scaling-file {output.scaling} \
             --output-filename {output.dataset} \
             --train '
