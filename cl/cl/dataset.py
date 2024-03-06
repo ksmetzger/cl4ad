@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 from sklearn.model_selection import train_test_split
+from sklearn.utils import shuffle
 
 NAME_MAPPINGS = {
     0:'W-Boson',
@@ -157,24 +158,27 @@ class CLBackgroundDataset:
 
 class CLSignalDataset:
     'Characterizes a dataset for PyTorch'
-    def __init__(self, data_filename, n_events=-1, preprocess=None):
+    def __init__(self, data_filename, n_events=-1, preprocess=None, device=None):
         'Initialization'
         self.data = np.load(data_filename, mmap_mode='r')
         self.labels = []
         self.n_events = n_events if n_events!=-1 else len( self.data[ next(iter(self.data)) ] )
         self.scaled_dataset = dict()
         for k in self.data.keys():
-            idx = np.random.choice(data[k].shape[0], size=self.n_events, replace=False)
+            idx = np.random.choice(self.data[k].shape[0], size=self.n_events, replace=False)
             np.random.shuffle(idx)
-            self.scaled_dataset[k], self.scaled_dataset[f"labels{k.replace('x','')}"] = self.data[k][idx], self.labels[k][idx]
+            self.scaled_dataset[k] = self.data[k][idx]
+            #self.scaled_dataset[f"labels{k.replace('x','')}"] = self.labels[k][idx]
 
         if preprocess:
             self.scaled_dataset = self.preprocess(self.scaled_dataset, preprocess)
+        
+        self.device = device
 
     def create_labels(self):
         for i_key, key in enumerate(self.data.keys()):
 
-            anomaly_dataset_i = self.data[key][:args.anomaly_size]
+            anomaly_dataset_i = self.data[key][:]
             print(f"making datasets for {key} anomaly with shape {anomaly_dataset_i.shape}")
 
             # Predicts anomaly_dataset_i using encoder and defines anomalous labels as 4.0
@@ -183,9 +187,9 @@ class CLSignalDataset:
 
     def save(self, filename, model):
         # Create and save new .npz with extracted features. Reports success
-        for k in self.scaled_dataset.keys():
+        for k in self.scaled_dataset.copy().keys():
             if 'label' not in k:
-                self.scaled_dataset['embedding_{k}'] = model.representation(self.scaled_dataset[k].reshape((-1,1,6))).cpu().detach().numpy()
+                self.scaled_dataset['embedding_'+k] = model.representation(torch.from_numpy(self.scaled_dataset[k]).to(dtype=torch.float32, device=self.device)).cpu().detach().numpy()
 
         np.savez(filename, **self.scaled_dataset)
         print(f'{filename} successfully saved')
@@ -196,3 +200,48 @@ class CLSignalDataset:
             data[k] = zscore_preprocess(data[k], scaling_file=scaling_filename)
 
         return data
+
+
+class CLBackgroundSignalDataset:
+    def __init__(self, data_filename, labels_filename, data_filename_signal, preprocess=True, n_events=-1, divisions=[1,1,1,1], device=None):
+        'Initialization'
+        rand_number = 0
+        np.random.seed(rand_number)
+        background_dataset = CLBackgroundDataset(data_filename,labels_filename, preprocess=preprocess,n_events=n_events,divisions=divisions, device=None)
+        signal_dataset = CLSignalDataset(data_filename_signal, n_events=n_events, preprocess=preprocess)
+        self.scaled_dataset_background = background_dataset.scaled_dataset
+        self.scaled_dataset_signal = signal_dataset.scaled_dataset
+        #Combine the datasets for training, for now ignore labels (only self-supervised) but can be added later
+        #Background part
+        self.x_train = background_dataset.x_train
+        self.x_test = background_dataset.x_test
+        self.x_val = background_dataset.x_val
+        #Signal part (Split into train:test:val)
+        self.signal_dict = dict()
+        for k in self.scaled_dataset_signal:
+            self.signal_dict[k+"_train"], self.signal_dict[k+"_test"], self.signal_dict[k+"_val"] = np.split(shuffle(signal_dataset.scaled_dataset[k], random_state=rand_number), 
+                       [int(.6*len(self.scaled_dataset_signal[k])), int(.8*len(self.scaled_dataset_signal[k]))])
+        for k in self.scaled_dataset_signal:
+            self.x_train = np.concatenate((self.x_train, self.signal_dict[k+"_train"]), axis=0)                                                              
+            self.x_test = np.concatenate((self.x_test, self.signal_dict[k+"_test"]), axis=0)
+            self.x_val = np.concatenate((self.x_val, self.signal_dict[k+"_val"]), axis=0)
+        self.x_train, self.x_test, self.x_val = shuffle(self.x_train, random_state=rand_number), shuffle(self.x_test, random_state=rand_number), shuffle(self.x_val, random_state=rand_number)
+        #Labels not integrated yet (filler for now)
+        self.labels_train = np.ones(len(self.x_train), dtype=int)
+        self.labels_test = np.ones(len(self.x_test), dtype=int)
+        self.labels_val = np.ones(len(self.x_val), dtype=int)
+
+    def report_specs(self):
+        '''
+        Reports file specs: keys, shape pairs. If divisions, also reports number of samples from each label represented
+        in dataset
+        '''
+        print('File Specs:')
+        for k in self.scaled_dataset_background:
+            if 'label' in k:
+                labels = self.scaled_dataset_background[k].copy()
+                labels = labels.reshape((labels.shape[0],))
+                label_counts = labels.astype(int)
+                label_counts = np.bincount(label_counts)
+                for label, count in enumerate(label_counts):
+                    print(f"Label {label, NAME_MAPPINGS[label]}: {count} occurances")
