@@ -21,6 +21,12 @@ TRAIN_TEST_VAL_MAP = {
     'x_test':0.333,
     'x_val':0.333
 }
+SIGNAL_MAP = {
+    'leptoquark':1,
+    'ato4l':0.1643518,
+    'hChToTauNu':2.232523,
+    'hToTauTau': 2.029938
+}
 
 def zscore_preprocess(
         input_array,
@@ -165,7 +171,7 @@ class CLSignalDataset:
         self.n_events = n_events if n_events!=-1 else len( self.data[ next(iter(self.data)) ] )
         self.scaled_dataset = dict()
         for k in self.data.keys():
-            idx = np.random.choice(self.data[k].shape[0], size=self.n_events, replace=False)
+            idx = np.random.choice(self.data[k].shape[0], size=int(self.n_events*SIGNAL_MAP[k]), replace=False)
             np.random.shuffle(idx)
             self.scaled_dataset[k] = self.data[k][idx]
             #self.scaled_dataset[f"labels{k.replace('x','')}"] = self.labels[k][idx]

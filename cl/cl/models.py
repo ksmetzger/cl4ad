@@ -62,4 +62,32 @@ class CVAE(torch.nn.Module):
 
         return z_proj
 
+class SimpleDense(torch.nn.Module):
+    def __init__(self, latent_dim = 48, expanded_dim = 192):
+        super(SimpleDense, self).__init__()
+        self.latent_dim = latent_dim
+        self.expanded_dim = expanded_dim
+
+        self.encoder = torch.nn.Sequential(
+            nn.Linear(57,52),
+            nn.BatchNorm1d(52),
+            nn.LeakyReLU(),
+            nn.Linear(52,self.latent_dim),
+            nn.BatchNorm1d(self.latent_dim),
+            nn.LeakyReLU()
+
+        )
+        self.expander = torch.nn.Sequential(
+            nn.Linear(self.latent_dim,96),
+            nn.BatchNorm1d(96),
+            nn.LeakyReLU(),
+            nn.Linear(96,self.expanded_dim)
+        )
+    def representation(self, x):
+        y = self.encoder(x)
+        return y
     
+    def forward(self, x):
+        y = self.representation(x)
+        z = self.expander(y)
+        return z

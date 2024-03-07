@@ -9,7 +9,7 @@ from torchsummary import summary
 
 import losses
 from dataset import TorchCLDataset, CLBackgroundDataset, CLSignalDataset, CLBackgroundSignalDataset
-from models import CVAE
+from models import CVAE, SimpleDense
 
 
 def main(args):
@@ -43,7 +43,7 @@ def main(args):
         batch_size=args.batch_size,
         shuffle=False)
 
-    model = CVAE().to(device)
+    model = SimpleDense().to(device)
     summary(model, input_size=(57,))
 
     # criterion = losses.SimCLRLoss()
@@ -147,6 +147,7 @@ def main(args):
     plt.legend()
     plt.savefig('output/loss.pdf')
 
+    #Save the embedding output seperately for the background and signal part
     #dataset.save(args.output_filename, model)
     CLBackgroundDataset(args.background_dataset, args.background_ids, n_events=args.sample_size,
         preprocess=args.scaling_filename,
