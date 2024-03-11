@@ -132,3 +132,28 @@ class CVAE_direct_simple(nn.Module):
         out = self.encoder(x)
         out_linear = self.linear(out)
         return out_linear, out
+    
+#Simpler two-layer model starting directly from the larger embedding trained with both background + signal
+class Dense_latent_simple(nn.Module):
+    def __init__(self, num_classes = 8):
+        super(Dense_latent_simple, self).__init__()
+        self.num_classes = num_classes
+        
+        self.encoder = torch.nn.Sequential(
+            nn.Linear(48,24),  
+            nn.BatchNorm1d(24),
+            nn.LeakyReLU(),
+            nn.Dropout(),          
+            nn.Linear(24,12),
+            nn.BatchNorm1d(12),
+            nn.LeakyReLU(),
+            nn.Dropout()
+            
+            )
+        self.linear = NormedLinear(12, self.num_classes)
+
+    def forward(self, x):
+        out = self.encoder(x)
+        out_linear = self.linear(out)
+        return out_linear, out
+

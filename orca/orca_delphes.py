@@ -183,6 +183,12 @@ def main():
         test_set = datasets.BACKGROUND_SIGNAL_CVAE_LATENT(root='./datasets',datatype='test', transform=datasets.dict_transform['cifar_test_kyle_cvae'])
         num_classes = 8
         args.labeled_num = 4
+    elif args.dataset == 'background_with_signal_dense_latent':
+        train_label_set = datasets.BACKGROUND_SIGNAL_DENSE_LATENT(root='./datasets',datatype='train_labeled', transform=TransformTwice(datasets.dict_transform['cifar_train_kyle_cvae']))
+        train_unlabel_set = datasets.BACKGROUND_SIGNAL_DENSE_LATENT(root='./datasets',datatype='train_unlabeled', transform=TransformTwice(datasets.dict_transform['cifar_train_kyle_cvae']))
+        test_set = datasets.BACKGROUND_SIGNAL_DENSE_LATENT(root='./datasets',datatype='test', transform=datasets.dict_transform['cifar_test_kyle_cvae'])
+        num_classes = 8
+        args.labeled_num = 4
     elif args.dataset == 'background_with_signal_cvae_latent_pytorch':
         train_label_set = datasets.BACKGROUND_SIGNAL_CVAE_LATENT_PYTORCH(root='./datasets',datatype='train_labeled', transform=TransformTwice(datasets.dict_transform['cifar_train_kyle_cvae']))
         train_unlabel_set = datasets.BACKGROUND_SIGNAL_CVAE_LATENT_PYTORCH(root='./datasets',datatype='train_unlabeled', transform=TransformTwice(datasets.dict_transform['cifar_train_kyle_cvae']))
@@ -218,6 +224,9 @@ def main():
             model = models.CVAE_latent(num_classes=num_classes)
         elif args.size == 'simple':
             model = models.CVAE_latent_simple(num_classes=num_classes)
+    elif args.dataset == 'background_with_signal_dense_latent':
+        if args.size == 'simple':
+            model = models.Dense_latent_simple(num_classes=num_classes)
     else:
         warnings.warn('Model is not listed')
         return

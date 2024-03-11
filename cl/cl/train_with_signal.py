@@ -10,7 +10,7 @@ from torchsummary import summary
 import losses
 from dataset import TorchCLDataset, CLBackgroundDataset, CLSignalDataset, CLBackgroundSignalDataset
 from models import CVAE, SimpleDense
-
+import augmentations
 
 def main(args):
     '''
@@ -31,7 +31,7 @@ def main(args):
     train_data_loader = DataLoader(
         TorchCLDataset(dataset.x_train, dataset.labels_train, device),
         batch_size=args.batch_size,
-        shuffle=False)
+        shuffle=True)
 
     test_data_loader = DataLoader(
         TorchCLDataset(dataset.x_test, dataset.labels_test, device),
@@ -71,9 +71,10 @@ def main(args):
             first_val_repeated = val[0].repeat(args.batch_size, 1)
 
             embedded_values_orig = model(val)
-            embedded_values_aug = model(first_val_repeated)
+            #embedded_values_aug = model(first_val_repeated)
+            embedded_values_aug = model(augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device))
 
-            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,1,6)), embedded_values_orig.reshape((-1,1,6)))
+            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,1,192)), embedded_values_orig.reshape((-1,1,192)))
 
             optimizer.zero_grad()
             similar_embedding_loss.backward()
@@ -99,10 +100,11 @@ def main(args):
 
             first_val_repeated = val[0].repeat(args.batch_size, 1)
 
-            embedded_values_aug = model(first_val_repeated)
             embedded_values_orig = model(val)
+	        #embedded_values_aug = model(first_val_repeated)
+            embedded_values_aug = model(augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device))
 
-            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,1,6)), embedded_values_orig.reshape((-1,1,6)))
+            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,1,192)), embedded_values_orig.reshape((-1,1,192)))
 
             running_sim_loss += similar_embedding_loss.item()
             if idx % 50 == 0:
@@ -137,7 +139,7 @@ def main(args):
 
         torch.save(model.state_dict(), args.model_name)
     else:
-        model.load_state_dict(torch.load(args.model_name))
+        model.load_state_dict(torch.load(args.model_name, map_location=torch.device(device)))
         model.eval()
 
     plt.plot(train_losses, label='train')

@@ -320,6 +320,85 @@ class BACKGROUND_SIGNAL_CVAE_LATENT(Dataset):
         image = self.transform(image)
         #label = self.target_transform(label)
         return image, label
+
+class BACKGROUND_SIGNAL_DENSE_LATENT(Dataset):
+
+    def __init__(self, root, datatype, rand_number=0, transform=None, target_transform=None):
+        
+        #Import the background + signals + labels
+        drive_path = 'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\'
+        
+        dataset = np.load(drive_path+'output/embedding.npz')
+        dataset_signal = np.load(drive_path+'output/anomalies_embedding.npz')
+        
+        background_data = dataset['embedding_train']
+        background_targets = dataset['labels_train']
+        background_targets = background_targets.reshape(-1)
+        
+        leptoquark = dataset_signal['embedding_leptoquark']
+        ato4l = dataset_signal['embedding_ato4l']
+        hChToTauNu = dataset_signal['embedding_hChToTauNu']
+        hToTauTau = dataset_signal['embedding_hToTauTau']
+        
+        #Transformations
+        self.transform = transform
+        self.target_transform = transforms.ToTensor()
+        
+        ###Random sample 1/4 (1/8) of the background for labeled data, 1/4 (1/8) of background + signals (1/8) for unlabeled data
+        #Random sample the background
+        np.random.seed(rand_number)
+        size_fraction_background = 1/4
+        size_fraction_signal = 1/4 
+        labeled_background, unlabeled_background, labeled_targets, unlabeled_targets = train_test_split(background_data, background_targets, test_size=size_fraction_background, train_size =size_fraction_background ,random_state=rand_number)
+        
+        #Also random sample the signals
+        unlabeled_leptoquark, _ = train_test_split(leptoquark, train_size=size_fraction_signal, random_state=rand_number)
+        unlabeled_ato4l, _ = train_test_split(ato4l, train_size=size_fraction_signal, random_state=rand_number)
+        unlabeled_hChToTauNu, _ = train_test_split(hChToTauNu, train_size=size_fraction_signal, random_state=rand_number)
+        unlabeled_hToTauTau, _ = train_test_split(hToTauTau, train_size=size_fraction_signal, random_state=rand_number)
+        
+        #Shuffle in signals (and their labels for testing) with the unlabeled background
+        unlabeled_data = np.concatenate((unlabeled_background, unlabeled_leptoquark, unlabeled_ato4l, unlabeled_hChToTauNu, unlabeled_hToTauTau), axis = 0)
+        unlabeled_targets = np.concatenate((unlabeled_targets, np.ones(len(unlabeled_leptoquark),dtype=int)*4, np.ones(len(unlabeled_ato4l),dtype=int)*5,np.ones(len(unlabeled_hChToTauNu),dtype=int)*6,np.ones(len(unlabeled_hToTauTau),dtype=int)*7),axis=0)
+        unlabeled_data_shuffled, unlabeled_targets_shuffled = shuffle(unlabeled_data, unlabeled_targets, random_state=rand_number)
+       
+        if datatype == 'train_labeled':
+            self.data = labeled_background
+            self.targets = labeled_targets
+     
+        elif datatype == 'train_unlabeled':
+            self.data = unlabeled_data_shuffled
+            self.targets = unlabeled_targets_shuffled
+            
+        elif datatype == 'test':
+            self.data = unlabeled_data_shuffled
+            self.targets = unlabeled_targets_shuffled
+        else:
+            warnings.warn('Type of dataset not available')
+            return
+        
+        
+        #Reshape the data
+        self.targets = self.targets.astype(int)
+        self.targets = self.targets.tolist()
+        self.data = np.vstack(self.data).reshape(-1, 48)
+        
+        #Print the shapes of data + targets
+        print(np.shape(self.data))
+        print(np.shape(self.targets))
+        print(type(self.targets[0]))
+
+    def __len__(self):
+        return len(self.targets)
+    
+    def __getitem__(self, idx):
+        image = self.data[idx]
+        image = torch.from_numpy(image) #Turn numpy array into tensor(48)
+        image = (image+0.3938)/3.9901  #Normalize the data to mean: 0, std: 1
+        label = self.targets[idx]
+        image = self.transform(image)
+        #label = self.target_transform(label)
+        return image, label
         
 
 class BACKGROUND_SIGNAL_CVAE_LATENT_PYTORCH(Dataset):
