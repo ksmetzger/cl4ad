@@ -2,10 +2,6 @@ import numpy as np
 from argparse import ArgumentParser
 import matplotlib.pyplot as plt
 
-import torch
-from torch.utils.data import Dataset
-from sklearn.model_selection import train_test_split
-
 NAME_MAPPINGS = {
     0:'W-Boson',
     1:'QCD',
@@ -53,27 +49,6 @@ def zscore_preprocess(
     # Outputs normalized pT while preserving original values for eta and phi
     outputs = np.concatenate([normalized_tensor[:,:,0,:], input_array[:,:,1,:], input_array[:,:,2,:]], axis=2)
     return np.reshape(outputs * mask, (-1, 57))
-
-
-class TorchCLDataset(Dataset):
-  'Characterizes a dataset for PyTorch'
-  def __init__(self, features, labels, device):
-        'Initialization'
-        self.device = device
-        self.features = torch.from_numpy(features).to(dtype=torch.float32, device=self.device)
-        self.labels = torch.from_numpy(labels).to(dtype=torch.float32, device=self.device)
-
-  def __len__(self):
-        'Denotes the total number of samples'
-        return len(self.features)
-
-  def __getitem__(self, index):
-        'Generates one sample of data'
-        # Load data and get label
-        X = self.features[index]
-        y = self.labels[index]
-
-        return X, y
 
 
 class CLBackgroundDataset:
@@ -219,7 +194,8 @@ if __name__=='__main__':
     parser.add_argument('anomaly_dataset', type=str)
 
     parser.add_argument('--scaling-filename', type=str)
-    parser.add_argument('--output-filename', type=str, default='output/background_dataset.npz')
+    parser.add_argument('--output-filename', type=str, default=None)
+    parser.add_argument('--output-anomaly-filename', type=str, default=None)
     parser.add_argument('--sample-size', type=int, default=-1)
     parser.add_argument('--mix-in-anomalies', action='store_true')
 
@@ -240,5 +216,5 @@ if __name__=='__main__':
         preprocess=args.scaling_filename
     )
     signal_dataset.report_specs()
-    signal_dataset.save(args.output_filename.replace('background','signal'))
+    signal_dataset.save(args.output_anomaly_filename)
 

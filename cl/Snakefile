@@ -6,18 +6,23 @@ rule create_dataset:
         divisions = [0.30, 0.30, 0.20, 0.20],
     output:
         scaling = 'output/scaling_values.npz',
+        background_dataset = 'output/background_dataset.npz',
+        anomaly_dataset = 'output/anomaly_dataset.npz'
     shell:
         'python3 cl/create_dataset.py {params.bkg} {params.bkg_ids} {params.anomaly} \
-            --scaling-file {output.scaling} '
+            --scaling-file {output.scaling} \
+            --output-filename {output.background_dataset} \
+            --output-anomaly-filename {output.anomaly_dataset} '
 
 rule train_cl:
+    input:
+        bkg = rules.create_dataset.output.background_dataset,
+        anomaly = rules.create_dataset.output.anomaly_dataset
     params:
         model = 'output/vae.pth'
     shell:
-        'python3 cl/train.py {params.bkg} {params.bkg_ids} {params.anomaly} \
+        'python3 cl/train.py {input.bkg} {input.anomaly} \
             --model-name {params.model} \
-            --scaling-file {output.scaling} \
-            --output-filename {output.dataset} \
             --train '
 
 rule create_embedding:

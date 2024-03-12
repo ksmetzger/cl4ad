@@ -8,8 +8,28 @@ from torch.utils.tensorboard import SummaryWriter
 from torchsummary import summary
 
 import losses
-from dataset import TorchCLDataset, CLBackgroundDataset
 from models import CVAE
+
+
+class TorchCLDataset(Dataset):
+  'Characterizes a dataset for PyTorch'
+  def __init__(self, features, labels, device):
+        'Initialization'
+        self.device = device
+        self.features = torch.from_numpy(features).to(dtype=torch.float32, device=self.device)
+        self.labels = torch.from_numpy(labels).to(dtype=torch.float32, device=self.device)
+
+  def __len__(self):
+        'Denotes the total number of samples'
+        return len(self.features)
+
+  def __getitem__(self, index):
+        'Generates one sample of data'
+        # Load data and get label
+        X = self.features[index]
+        y = self.labels[index]
+
+        return X, y
 
 
 def main(args):
@@ -20,33 +40,28 @@ def main(args):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print(f'Using {device}')
 
-    dataset = CLBackgroundDataset(args.background_dataset, args.background_ids,
-        preprocess=args.scaling_filename,
-        divisions=[0.30, 0.30, 0.20, 0.20],
-        device=device
-    )
-    dataset.report_specs()
+    dataset = np.load(args.background_dataset)
 
     train_data_loader = DataLoader(
-        TorchCLDataset(dataset.x_train, dataset.labels_train, device),
+        TorchCLDataset(dataset['x_train'], dataset['labels_train'], device),
         batch_size=args.batch_size,
         shuffle=False)
 
     test_data_loader = DataLoader(
-        TorchCLDataset(dataset.x_test, dataset.labels_test, device),
+        TorchCLDataset(dataset['x_test'], dataset['labels_test'], device),
         batch_size=args.batch_size,
         shuffle=False)
 
     val_data_loader = DataLoader(
-        TorchCLDataset(dataset.x_val, dataset.labels_val, device),
+        TorchCLDataset(dataset['x_val'], dataset['labels_val'], device),
         batch_size=args.batch_size,
         shuffle=False)
 
     model = CVAE().to(device)
     summary(model, input_size=(57,))
 
-    criterion = losses.SimCLRLoss()
-    # criterion = losses.VICRegLoss()
+    # criterion = losses.SimCLRLoss()
+    criterion = losses.VICRegLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
     scheduler_1 = torch.optim.lr_scheduler.ConstantLR(optimizer, total_iters=5)
@@ -72,7 +87,7 @@ def main(args):
             embedded_values_orig = model(val)
             embedded_values_aug = model(first_val_repeated)
 
-            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,6)), embedded_values_orig.reshape((-1,6)))
+            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,1,6)), embedded_values_orig.reshape((-1,1,6)))
 
             optimizer.zero_grad()
             similar_embedding_loss.backward()
@@ -101,7 +116,7 @@ def main(args):
             embedded_values_aug = model(first_val_repeated)
             embedded_values_orig = model(val)
 
-            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,6)), embedded_values_orig.reshape((-1,6)))
+            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,1,6)), embedded_values_orig.reshape((-1,1,6)))
 
             running_sim_loss += similar_embedding_loss.item()
             if idx % 50 == 0:
@@ -146,8 +161,6 @@ def main(args):
     plt.legend()
     plt.savefig('output/loss.pdf')
 
-    dataset.save(args.output_filename, model)
-
 
 if __name__ == '__main__':
     # Parses terminal command
@@ -155,7 +168,6 @@ if __name__ == '__main__':
 
     # If not using full data, name of smaller dataset to pull from
     parser.add_argument('background_dataset', type=str)
-    parser.add_argument('background_ids', type=str)
     parser.add_argument('anomaly_dataset', type=str)
 
     parser.add_argument('--epochs', type=int, default=10)
