@@ -45,8 +45,8 @@ def main(args):
     model = CVAE().to(device)
     summary(model, input_size=(57,))
 
-    # criterion = losses.SimCLRLoss()
-    criterion = losses.VICRegLoss()
+    criterion = losses.SimCLRLoss()
+    # criterion = losses.VICRegLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
     scheduler_1 = torch.optim.lr_scheduler.ConstantLR(optimizer, total_iters=5)
@@ -72,7 +72,7 @@ def main(args):
             embedded_values_orig = model(val)
             embedded_values_aug = model(first_val_repeated)
 
-            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,1,6)), embedded_values_orig.reshape((-1,1,6)))
+            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,6)), embedded_values_orig.reshape((-1,6)))
 
             optimizer.zero_grad()
             similar_embedding_loss.backward()
@@ -101,7 +101,7 @@ def main(args):
             embedded_values_aug = model(first_val_repeated)
             embedded_values_orig = model(val)
 
-            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,1,6)), embedded_values_orig.reshape((-1,1,6)))
+            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,6)), embedded_values_orig.reshape((-1,6)))
 
             running_sim_loss += similar_embedding_loss.item()
             if idx % 50 == 0:
@@ -148,8 +148,6 @@ def main(args):
 
     dataset.save(args.output_filename, model)
 
-    CLSignalDataset(args.anomaly_dataset, preprocess=args.scaling_filename).save(f'anomalies_embedding.npz', model)
-
 
 if __name__ == '__main__':
     # Parses terminal command
@@ -160,8 +158,8 @@ if __name__ == '__main__':
     parser.add_argument('background_ids', type=str)
     parser.add_argument('anomaly_dataset', type=str)
 
-    parser.add_argument('--epochs', type=int, default=1)
-    parser.add_argument('--batch-size', type=int, default=1024)
+    parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--loss-temp', type=float, default=0.07)
     parser.add_argument('--model-name', type=str, default='output/vae.pth')
     parser.add_argument('--scaling-filename', type=str)
