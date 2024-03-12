@@ -8,8 +8,28 @@ from torch.utils.tensorboard import SummaryWriter
 from torchsummary import summary
 
 import losses
-from dataset import TorchCLDataset, CLBackgroundDataset
 from models import CVAE
+
+
+class TorchCLDataset(Dataset):
+  'Characterizes a dataset for PyTorch'
+  def __init__(self, features, labels, device):
+        'Initialization'
+        self.device = device
+        self.features = torch.from_numpy(features).to(dtype=torch.float32, device=self.device)
+        self.labels = torch.from_numpy(labels).to(dtype=torch.float32, device=self.device)
+
+  def __len__(self):
+        'Denotes the total number of samples'
+        return len(self.features)
+
+  def __getitem__(self, index):
+        'Generates one sample of data'
+        # Load data and get label
+        X = self.features[index]
+        y = self.labels[index]
+
+        return X, y
 
 
 def main(args):
@@ -20,25 +40,20 @@ def main(args):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print(f'Using {device}')
 
-    dataset = CLBackgroundDataset(args.background_dataset, args.background_ids,
-        preprocess=args.scaling_filename,
-        divisions=[0.30, 0.30, 0.20, 0.20],
-        device=device
-    )
-    dataset.report_specs()
+    dataset = np.load(args.background_dataset)
 
     train_data_loader = DataLoader(
-        TorchCLDataset(dataset.x_train, dataset.labels_train, device),
+        TorchCLDataset(dataset['x_train'], dataset['labels_train'], device),
         batch_size=args.batch_size,
         shuffle=False)
 
     test_data_loader = DataLoader(
-        TorchCLDataset(dataset.x_test, dataset.labels_test, device),
+        TorchCLDataset(dataset['x_test'], dataset['labels_test'], device),
         batch_size=args.batch_size,
         shuffle=False)
 
     val_data_loader = DataLoader(
-        TorchCLDataset(dataset.x_val, dataset.labels_val, device),
+        TorchCLDataset(dataset['x_val'], dataset['labels_val'], device),
         batch_size=args.batch_size,
         shuffle=False)
 
@@ -146,10 +161,6 @@ def main(args):
     plt.legend()
     plt.savefig('output/loss.pdf')
 
-    dataset.save(args.output_filename, model)
-
-    CLSignalDataset(args.anomaly_dataset, preprocess=args.scaling_filename).save(f'anomalies_embedding.npz', model)
-
 
 if __name__ == '__main__':
     # Parses terminal command
@@ -157,11 +168,10 @@ if __name__ == '__main__':
 
     # If not using full data, name of smaller dataset to pull from
     parser.add_argument('background_dataset', type=str)
-    parser.add_argument('background_ids', type=str)
     parser.add_argument('anomaly_dataset', type=str)
 
-    parser.add_argument('--epochs', type=int, default=1)
-    parser.add_argument('--batch-size', type=int, default=1024)
+    parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--loss-temp', type=float, default=0.07)
     parser.add_argument('--model-name', type=str, default='output/vae.pth')
     parser.add_argument('--scaling-filename', type=str)
