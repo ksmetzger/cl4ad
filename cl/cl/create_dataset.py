@@ -154,14 +154,13 @@ class CLBackgroundDataset:
 
 class CLSignalDataset:
     'Characterizes a dataset for PyTorch'
-    def __init__(self, data_filename, n_events=-1, preprocess=None):
+    def __init__(self, data_filename, preprocess=None):
         'Initialization'
         self.data = np.load(data_filename, mmap_mode='r')
         self.labels = self.create_labels()
-        self.n_events = n_events if n_events!=-1 else len( self.data[ next(iter(self.data)) ] )
         self.scaled_dataset = dict()
         for k in self.data.keys():
-            idx = np.random.choice(self.data[k].shape[0], size=self.n_events, replace=False)
+            idx = np.random.choice(self.data[k].shape[0], size=self.data[k].shape[0], replace=False)
             np.random.shuffle(idx)
             self.scaled_dataset[k], self.scaled_dataset[f"labels_{k}"] = self.data[k][idx], self.labels[k][idx]
 
@@ -185,11 +184,11 @@ class CLSignalDataset:
     def preprocess(self, data, scaling_filename):
         # Normalizes train and testing features by x' = (x - μ) / σ, where μ, σ are predetermined constants
         for k in data.keys():
-            data[k] = zscore_preprocess(data[k], scaling_file=scaling_filename)
+            if not 'label' in k: data[k] = zscore_preprocess(data[k], scaling_file=scaling_filename)
 
         return data
 
-    def save(self, filename, model):
+    def save(self, filename):
         np.savez(filename, **self.scaled_dataset)
         print(f'{filename} successfully saved')
 
