@@ -63,7 +63,7 @@ class CVAE(torch.nn.Module):
         return z_proj
 
 class SimpleDense(torch.nn.Module):
-    def __init__(self, latent_dim = 48, expanded_dim = 192):
+    def __init__(self, latent_dim = 48, expanded_dim = 96):
         super(SimpleDense, self).__init__()
         self.latent_dim = latent_dim
         self.expanded_dim = expanded_dim
@@ -78,14 +78,55 @@ class SimpleDense(torch.nn.Module):
 
         )
         self.expander = torch.nn.Sequential(
-            nn.Linear(self.latent_dim,96),
-            nn.BatchNorm1d(96),
+            nn.Linear(self.latent_dim,72),
+            nn.BatchNorm1d(72),
             nn.LeakyReLU(),
-            nn.Linear(96,self.expanded_dim)
+            nn.Linear(72,self.expanded_dim)
         )
     def representation(self, x):
         y = self.encoder(x)
         return y
+    
+    def forward(self, x):
+        y = self.representation(x)
+        z = self.expander(y)
+        return z
+#similar implementation to https://github.com/fastmachinelearning/l1-jet-id/blob/main/deepsets/deepsets/deepsets.py
+class DeepSets(torch.nn.Module):
+    def __init__(self, latent_dim=48, expanded_dim=96):
+        super(DeepSets, self).__init__()
+        self.latent_dim = latent_dim
+        self.expanded_dim = expanded_dim
+        self.phi = torch.nn.Sequential(
+            nn.Linear(3,32),
+            nn.BatchNorm1d(32),
+            nn.LeakyReLU(),
+            nn.Linear(32,32),
+            nn.BatchNorm1d(32),
+            nn.LeakyReLU(),
+            nn.Linear(32,32),
+            nn.BatchNorm1d(32),
+            nn.LeakyReLU()
+        )
+        self.rho = torch.nn.Sequential(
+            nn.Linear(32,32),
+            nn.BatchNorm1d(32),
+            nn.LeakyReLU(),
+            nn.Linear(32,self.latent_dim),
+            nn.BatchNorm1d(self.latent_dim),
+            nn.LeakyReLU()
+        )
+        self.expander = torch.nn.Sequential(
+            nn.Linear(self.latent_dim,72),
+            nn.BatchNorm1d(72),
+            nn.LeakyReLU(),
+            nn.Linear(72,self.expanded_dim)
+        )
+    def representation(self, x):
+        phi_out = self.phi(x)
+        sum_out  = torch.mean(phi_out, dim = 1) 
+        rho_out = self.rho(sum_out)
+        return rho_out
     
     def forward(self, x):
         y = self.representation(x)

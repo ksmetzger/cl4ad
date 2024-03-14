@@ -350,7 +350,8 @@ class BACKGROUND_SIGNAL_DENSE_LATENT(Dataset):
         size_fraction_background = 1/4
         size_fraction_signal = 1/4 
         labeled_background, unlabeled_background, labeled_targets, unlabeled_targets = train_test_split(background_data, background_targets, test_size=size_fraction_background, train_size =size_fraction_background ,random_state=rand_number)
-        
+        self.mean_background = np.mean(labeled_background)
+        self.std_background = np.std(labeled_background)
         #Also random sample the signals
         unlabeled_leptoquark, _ = train_test_split(leptoquark, train_size=size_fraction_signal, random_state=rand_number)
         unlabeled_ato4l, _ = train_test_split(ato4l, train_size=size_fraction_signal, random_state=rand_number)
@@ -394,7 +395,7 @@ class BACKGROUND_SIGNAL_DENSE_LATENT(Dataset):
     def __getitem__(self, idx):
         image = self.data[idx]
         image = torch.from_numpy(image) #Turn numpy array into tensor(48)
-        image = (image+0.3938)/3.9901  #Normalize the data to mean: 0, std: 1
+        image = (image-self.mean_background)/self.std_background  #Normalize the data to mean: 0, std: 1
         label = self.targets[idx]
         image = self.transform(image)
         #label = self.target_transform(label)

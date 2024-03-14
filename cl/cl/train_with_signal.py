@@ -47,8 +47,9 @@ def main(args):
     summary(model, input_size=(57,))
 
     # criterion = losses.SimCLRLoss()
-    criterion = losses.VICRegLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+    #criterion = losses.VICRegLoss()
+    criterion = losses.SimCLRloss_nolabels_fast()
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
     scheduler_1 = torch.optim.lr_scheduler.ConstantLR(optimizer, total_iters=5)
     scheduler_2 = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.95)
@@ -73,8 +74,8 @@ def main(args):
             embedded_values_orig = model(val)
             #embedded_values_aug = model(first_val_repeated)
             embedded_values_aug = model(augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device))
-
-            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,1,192)), embedded_values_orig.reshape((-1,1,192)))
+            feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
+            similar_embedding_loss = criterion(feature)
 
             optimizer.zero_grad()
             similar_embedding_loss.backward()
@@ -103,8 +104,8 @@ def main(args):
             embedded_values_orig = model(val)
 	        #embedded_values_aug = model(first_val_repeated)
             embedded_values_aug = model(augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device))
-
-            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,1,192)), embedded_values_orig.reshape((-1,1,192)))
+            feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
+            similar_embedding_loss = criterion(feature)
 
             running_sim_loss += similar_embedding_loss.item()
             if idx % 50 == 0:
@@ -142,12 +143,12 @@ def main(args):
         model.load_state_dict(torch.load(args.model_name, map_location=torch.device(device)))
         model.eval()
 
-    plt.plot(train_losses, label='train')
-    plt.plot(val_losses, label='val')
-    plt.xlabel('iterations')
-    plt.ylabel('Loss')
-    plt.legend()
-    plt.savefig('output/loss.pdf')
+    #plt.plot(train_losses, label='train')
+    #plt.plot(val_losses, label='val')
+    #plt.xlabel('iterations')
+    #plt.ylabel('Loss')
+    #plt.legend()
+    #plt.savefig('output/loss.pdf')
 
     #Save the embedding output seperately for the background and signal part
     #dataset.save(args.output_filename, model)
