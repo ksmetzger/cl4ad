@@ -227,6 +227,8 @@ def main():
     elif args.dataset == 'background_with_signal_dense_latent':
         if args.size == 'simple':
             model = models.Dense_latent_simple(num_classes=num_classes)
+        elif args.size == 'large':
+            model = models.Dense_latent_large(num_classes=num_classes)
     else:
         warnings.warn('Model is not listed')
         return

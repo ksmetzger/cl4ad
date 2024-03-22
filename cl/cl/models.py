@@ -99,19 +99,22 @@ class DeepSets(torch.nn.Module):
         self.expanded_dim = expanded_dim
         self.phi = torch.nn.Sequential(
             nn.Linear(3,32),
-            nn.BatchNorm1d(32),
+            #nn.BatchNorm1d(32),    #BatchNorm does not work on 2d input -> pot. switch to batchnorm2d
             nn.LeakyReLU(),
+            #nn.Dropout1d(),        #Using dropout everywhere the loss does not decrease at all!
             nn.Linear(32,32),
-            nn.BatchNorm1d(32),
+            #nn.BatchNorm1d(32),
             nn.LeakyReLU(),
+            #nn.Dropout1d(),
             nn.Linear(32,32),
-            nn.BatchNorm1d(32),
+            #nn.BatchNorm1d(32),
             nn.LeakyReLU()
         )
         self.rho = torch.nn.Sequential(
             nn.Linear(32,32),
-            nn.BatchNorm1d(32),
+            nn.BatchNorm1d(32),     #Without batchnorm in rho/expander the validation loss is diverging.
             nn.LeakyReLU(),
+            #nn.Dropout1d(),
             nn.Linear(32,self.latent_dim),
             nn.BatchNorm1d(self.latent_dim),
             nn.LeakyReLU()
