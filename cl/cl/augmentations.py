@@ -51,3 +51,26 @@ def rot_around_beamline(input_batch, device=None, rand_number=0):
     rotated_batch = torch.from_numpy(input_numpy.reshape(-1,57)).to(dtype=torch.float32, device=device)
 
     return rotated_batch
+
+def gaussian_resampling_pT(input_batch, device=None, rand_number=0, std_scale=0.1):
+    '''
+    Applies the augmentation "gaussian resampling of pT" to events in a batch (torch tensor) and outputs a torch tensor with pT values rescaled within std.
+    Resample pT of constituents with mu=pT, std=pT*std_scale in the DELPHES dataset w/ structure: MET, 4x electron, 4x muon, 10x jet.
+    Each constituent has 3x features: transverse mom. pT, pseudorapidity eta, azimuthal angle phi.
+    Args:
+        input_batch: (batch_size, 57) flattened input
+        device: cuda or cpu depending on input
+        std_scale: scale multiplier for standard deviation std = pT * std_scale (default: 0.1)
+    Returns:
+        resampled_batch: (batch_size, 57) permutated output
+    '''
+    input_numpy = input_batch.cpu().detach().numpy().reshape(-1,19,3)
+    #Guassian resample the pT's of each constituent with mu=pT and std = pT * std_scale
+    np.random.seed(rand_number) #not sure if I should seed
+    for x in input_numpy:
+        x[:,0] = np.random.normal(loc=x[:,0], scale=np.absolute(x[:,0])*std_scale)
+
+    #Return a torch tensor on the given device and correct shape (-1,57)
+    resampled_batch = torch.from_numpy(input_numpy.reshape(-1,57)).to(dtype=torch.float32, device=device)
+
+    return resampled_batch

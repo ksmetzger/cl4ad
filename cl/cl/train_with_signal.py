@@ -43,12 +43,12 @@ def main(args):
         batch_size=args.batch_size,
         shuffle=False)
 
-    model = DeepSets().to(device)
-    summary(model, input_size=(19,3))
+    model = SimpleDense().to(device)
+    summary(model, input_size=(57,))
 
     # criterion = losses.SimCLRLoss()
-    #criterion = losses.VICRegLoss()
-    criterion = losses.SimCLRloss_nolabels_fast()
+    criterion = losses.VICRegLoss()
+    #criterion = losses.SimCLRloss_nolabels_fast()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
     scheduler_1 = torch.optim.lr_scheduler.ConstantLR(optimizer, total_iters=5)
@@ -69,13 +69,14 @@ def main(args):
                 continue
 
             # embed entire batch with first value of the batch repeated
-            first_val_repeated = val[0].repeat(args.batch_size, 1)
+            #first_val_repeated = val[0].repeat(args.batch_size, 1)
             #For DeepSets needs input shape (bsz, 19 , 3)
-            embedded_values_orig = model(val.reshape(-1,19,3))
+            embedded_values_orig = model(augmentations.gaussian_resampling_pT(val,device=device, rand_number=0))
             #embedded_values_aug = model(first_val_repeated)
-            embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
-            feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
-            similar_embedding_loss = criterion(feature)
+            #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
+            embedded_values_aug = model(augmentations.gaussian_resampling_pT(val,device=device, rand_number=42))
+            #feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
+            similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,1,96)), embedded_values_aug.reshape((-1,1,96)))
 
             optimizer.zero_grad()
             similar_embedding_loss.backward()
@@ -99,13 +100,14 @@ def main(args):
             if val.shape[0] != args.batch_size:
                 continue
 
-            first_val_repeated = val[0].repeat(args.batch_size, 1)
+            #first_val_repeated = val[0].repeat(args.batch_size, 1)
 
-            embedded_values_orig = model(val.reshape(-1,19,3))
+            embedded_values_orig = model(augmentations.gaussian_resampling_pT(val,device=device, rand_number=0))
 	        #embedded_values_aug = model(first_val_repeated)
-            embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
-            feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
-            similar_embedding_loss = criterion(feature)
+            #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
+            embedded_values_aug = model(augmentations.gaussian_resampling_pT(val,device=device, rand_number=42))
+            #feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
+            similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,1,96)), embedded_values_aug.reshape((-1,1,96)))
 
             running_sim_loss += similar_embedding_loss.item()
             if idx % 50 == 0:
@@ -156,8 +158,8 @@ def main(args):
         CLBackgroundDataset(args.background_dataset, args.background_ids, n_events=args.sample_size,
             preprocess=args.scaling_filename,
             divisions=[0.592,0.338,0.067,0.003],
-            device=device).save(args.output_filename, model)
-        CLSignalDataset(args.anomaly_dataset,n_events=args.sample_size, preprocess=args.scaling_filename, device=device).save(f'output/anomalies_embedding.npz', model)
+            device=device).save_embedding(args.output_filename, model)
+        CLSignalDataset(args.anomaly_dataset,n_events=args.sample_size, preprocess=args.scaling_filename, device=device).save_embedding(f'output/anomalies_embedding.npz', model)
 
 
 if __name__ == '__main__':

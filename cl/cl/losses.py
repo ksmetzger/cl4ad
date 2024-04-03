@@ -72,8 +72,8 @@ class VICRegLoss(torch.nn.Module):
         y_mu = y.mean(dim=0)
         y_std = y.std(dim=0) + 1e-2
 
-        x = (x - x_mu)/x_std
-        y = (y - y_mu)/y_std
+        x = (x - x_mu)
+        y = (y - y_mu)
 
         N = x.size(0)
         D = x.size(-1)
@@ -87,7 +87,7 @@ class VICRegLoss(torch.nn.Module):
         cov_loss = self.off_diagonal(cov_x).pow_(2).sum().div(D)
         cov_loss += self.off_diagonal(cov_y).pow_(2).sum().div(D)
 
-        return repr_loss + cov_loss + std_loss
+        return 1.0*repr_loss + 1.0*cov_loss + 1.0*std_loss
 
     def off_diagonal(self, x):
         num_batch, n, m = x.shape
@@ -102,7 +102,7 @@ class SimCLRloss_nolabels_fast(torch.nn.Module):
     see https://arxiv.org/pdf/2002.05709.pdf
     Implementation from https://github.com/HobbitLong/SupContrast/blob/master/losses.py.
     """
-    def __init__(self, temperature=0.07,contrast_mode='all',
+    def __init__(self, temperature=0.07,contrast_mode='one',
                  base_temperature=0.07):
         super(SimCLRloss_nolabels_fast, self).__init__()
         self.temperature = temperature
