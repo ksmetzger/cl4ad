@@ -65,29 +65,34 @@ class VICRegLoss(torch.nn.Module):
         super().__init__()
 
     def forward(self, x, y):
-        repr_loss = F.mse_loss(x, y)
 
         x_mu = x.mean(dim=0)
-        x_std = x.std(dim=0) + 1e-2
         y_mu = y.mean(dim=0)
-        y_std = y.std(dim=0) + 1e-2
+        x = (x - x_mu)
+        y = (y - y_mu)
 
-        x = (x - x_mu)/x_std
-        y = (y - y_mu)/y_std
+        loss_inv = F.mse_loss(x, y)
+
+        std_x = torch.sqrt(x.var(dim=0) + 1e-2)
+        std_y = torch.sqrt(y.var(dim=0) + 1e-2)
+        loss_x = torch.mean(F.relu(1 - std_x))
+        loss_y = torch.mean(F.relu(1 - std_y))
+        loss_var = loss_x + loss_y
 
         N = x.size(0)
         D = x.size(-1)
-
-        std_loss = torch.mean(F.relu(1 - x_std, inplace=False)) / 2
-        std_loss += torch.mean(F.relu(1 - y_std, inplace=False)) / 2
-
         cov_x = (x.transpose(1, 2).contiguous() @ x) / (N - 1)
         cov_y = (y.transpose(1, 2).contiguous() @ y) / (N - 1)
+        loss_cov = self.off_diagonal(cov_x).pow_(2).sum().div(D)
+        loss_cov += self.off_diagonal(cov_y).pow_(2).sum().div(D)
 
-        cov_loss = self.off_diagonal(cov_x).pow_(2).sum().div(D)
-        cov_loss += self.off_diagonal(cov_y).pow_(2).sum().div(D)
+        weighted_inv = loss_inv * 25 # * self.hparams.invariance_loss_weight
+        weighted_var = loss_var * 25 # self.hparams.variance_loss_weight
+        weighted_cov = loss_cov * 1 #self.hparams.covariance_loss_weight
 
-        return repr_loss + cov_loss + std_loss
+        loss = weighted_inv + weighted_var + weighted_cov
+
+        return loss
 
     def off_diagonal(self, x):
         num_batch, n, m = x.shape

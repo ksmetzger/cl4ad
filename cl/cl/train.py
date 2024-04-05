@@ -4,32 +4,35 @@ import matplotlib.pyplot as plt
 
 import torch
 from torch.utils.data import DataLoader, Dataset
-from torch.utils.tensorboard import SummaryWriter
 from torchsummary import summary
+torch.autograd.set_detect_anomaly(True)
+
 
 import losses
 from models import CVAE
 
 
 class TorchCLDataset(Dataset):
-  'Characterizes a dataset for PyTorch'
-  def __init__(self, features, labels, device):
-        'Initialization'
-        self.device = device
-        self.features = torch.from_numpy(features).to(dtype=torch.float32, device=self.device)
-        self.labels = torch.from_numpy(labels).to(dtype=torch.float32, device=self.device)
+    'Characterizes a dataset for PyTorch'
+    def __init__(self, features, ix, ixa, labels, criterion, device):
+          'Initialization'
+          self.device = device
+          self.features = torch.from_numpy(features[ix]).to(dtype=torch.float32, device=self.device)
+          self.augmentations = torch.from_numpy(features[ixa].copy()).to(dtype=torch.float32, device=self.device)
+          self.labels = torch.from_numpy(labels[ix]).to(dtype=torch.float32, device=self.device)
 
-  def __len__(self):
-        'Denotes the total number of samples'
-        return len(self.features)
+    def __len__(self):
+          'Denotes the total number of samples'
+          return len(self.features)
 
-  def __getitem__(self, index):
-        'Generates one sample of data'
-        # Load data and get label
-        X = self.features[index]
-        y = self.labels[index]
+    def __getitem__(self, index):
+          'Generates one sample of data'
+          # Load data and get label
+          X = self.features[index]
+          X_aug = self.augmentations[index]
+          y = self.labels[index]
 
-        return X, y
+          return X, X_aug, y
 
 
 def main(args):
@@ -42,26 +45,42 @@ def main(args):
 
     dataset = np.load(args.background_dataset)
 
+    # criterion = losses.SimCLRLoss()
+    criterion = losses.VICRegLoss()
+
     train_data_loader = DataLoader(
-        TorchCLDataset(dataset['x_train'], dataset['labels_train'], device),
+        TorchCLDataset(
+            dataset['x_train'],
+            dataset['ix_train'],
+            dataset['ixa_train'],
+            dataset['labels_train'],
+            criterion, device),
         batch_size=args.batch_size,
         shuffle=False)
 
     test_data_loader = DataLoader(
-        TorchCLDataset(dataset['x_test'], dataset['labels_test'], device),
+        TorchCLDataset(
+            dataset['x_test'],
+            dataset['ix_test'],
+            dataset['ixa_test'],
+            dataset['labels_test'],
+            criterion, device),
         batch_size=args.batch_size,
         shuffle=False)
 
     val_data_loader = DataLoader(
-        TorchCLDataset(dataset['x_val'], dataset['labels_val'], device),
+        TorchCLDataset(
+            dataset['x_val'],
+            dataset['ix_val'],
+            dataset['ixa_val'],
+            dataset['labels_val'],
+            criterion, device),
         batch_size=args.batch_size,
         shuffle=False)
 
     model = CVAE().to(device)
     summary(model, input_size=(57,))
 
-    # criterion = losses.SimCLRLoss()
-    criterion = losses.VICRegLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
     scheduler_1 = torch.optim.lr_scheduler.ConstantLR(optimizer, total_iters=5)
@@ -71,23 +90,21 @@ def main(args):
     scheduler = torch.optim.lr_scheduler.SequentialLR(
         optimizer, schedulers=[scheduler_1, scheduler_2, scheduler_3], milestones=[5, 20])
 
-    def train_one_epoch(epoch_index, tb_writer):
+
+    def train_one_epoch(epoch_index):
         running_sim_loss = 0.
         last_sim_loss = 0.
 
-        for idx, val in enumerate(train_data_loader, 1):
-            val = val[0]
+        for idx, (val, val_aug, _) in enumerate(train_data_loader, 1):
             # only applicable to the final batch
             if val.shape[0] != args.batch_size:
                 continue
 
-            # embed entire batch with first value of the batch repeated
-            first_val_repeated = val[0].repeat(args.batch_size, 1)
-
             embedded_values_orig = model(val)
-            embedded_values_aug = model(first_val_repeated)
+            embedded_values_aug = model(val_aug)
 
-            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,1,6)), embedded_values_orig.reshape((-1,1,6)))
+            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,1,6)), \
+                embedded_values_orig.reshape((-1,1,6)))
 
             optimizer.zero_grad()
             similar_embedding_loss.backward()
@@ -96,39 +113,32 @@ def main(args):
             running_sim_loss += similar_embedding_loss.item()
             if idx % 500 == 0:
                 last_sim_loss = running_sim_loss / 500
-                tb_x = epoch_index * len(train_data_loader) + idx
-                tb_writer.add_scalar('SimLoss/train', last_sim_loss, tb_x)
                 running_sim_loss = 0.
+
         return last_sim_loss
 
 
-    def val_one_epoch(epoch_index, tb_writer):
+    def val_one_epoch(epoch_index):
         running_sim_loss = 0.
         last_sim_loss = 0.
 
-        for idx, val in enumerate(val_data_loader, 1):
-            val = val[0]
+        for idx,(val, val_aug, _) in enumerate(val_data_loader, 1):
+
             if val.shape[0] != args.batch_size:
                 continue
 
-            first_val_repeated = val[0].repeat(args.batch_size, 1)
-
-            embedded_values_aug = model(first_val_repeated)
             embedded_values_orig = model(val)
+            embedded_values_aug = model(val_aug)
 
-            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,1,6)), embedded_values_orig.reshape((-1,1,6)))
+            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,1,6)), \
+                embedded_values_orig.reshape((-1,1,6)))
 
             running_sim_loss += similar_embedding_loss.item()
-            if idx % 50 == 0:
-                last_sim_loss = running_sim_loss / 50
-                tb_x = epoch_index * len(val_data_loader) + idx + 1
-                tb_writer.add_scalar('SimLoss/val', last_sim_loss, tb_x)
-                tb_writer.flush()
+            if idx % 500 == 0:
+                last_sim_loss = running_sim_loss / 500
                 running_sim_loss = 0.
-        tb_writer.flush()
-        return last_sim_loss
 
-    writer = SummaryWriter("output/results", comment="Similarity with LR=1e-3", flush_secs=5)
+        return last_sim_loss
 
     if args.train:
         train_losses = []
@@ -137,12 +147,12 @@ def main(args):
             print(f'EPOCH {epoch}')
             # Gradient tracking
             model.train(True)
-            avg_train_loss = train_one_epoch(epoch, writer)
+            avg_train_loss = train_one_epoch(epoch)
             train_losses.append(avg_train_loss)
 
             # no gradient tracking, for validation
             model.train(False)
-            avg_val_loss = val_one_epoch(epoch, writer)
+            avg_val_loss = val_one_epoch(epoch)
             val_losses.append(avg_val_loss)
 
             print(f"Train/Val Sim Loss after epoch: {avg_train_loss:.4f}/{avg_val_loss:.4f}")

@@ -1,6 +1,7 @@
 import numpy as np
 from argparse import ArgumentParser
 import matplotlib.pyplot as plt
+from sklearn.utils import shuffle
 
 NAME_MAPPINGS = {
     0:'W-Boson',
@@ -61,23 +62,15 @@ class CLBackgroundDataset:
         self.scaled_dataset = dict()
         for k in self.data.keys():
             if 'x_' in k:
-                idx = np.random.choice(self.data[k].shape[0], size=int(self.n_events*TRAIN_TEST_VAL_MAP[k]), replace=False)
-                np.random.shuffle(idx)
-                self.scaled_dataset[k], self.scaled_dataset[f"labels{k.replace('x','')}"] = \
-                    self.division_indicies(self.data[k][idx], self.labels[k.replace('x', 'background_ID')][idx], divisions)
+                self.scaled_dataset[f"{k.replace('x','ix')}"], self.scaled_dataset[f"{k.replace('x','ixa')}"] = \
+                    self.division_indicies(self.data[k], self.labels[k.replace('x', 'background_ID')], divisions)
 
         if preprocess:
-            self.scaled_dataset = self.preprocess(self.scaled_dataset, preprocess)
-
-        self.x_train = self.scaled_dataset['x_train']
-        self.x_test = self.scaled_dataset['x_test']
-        self.x_val = self.scaled_dataset['x_val']
-        self.labels_train = self.scaled_dataset['labels_train']
-        self.labels_test = self.scaled_dataset['labels_test']
-        self.labels_val = self.scaled_dataset['labels_val']
+            self.preprocess(preprocess)
 
     def division_indicies(self, data, labels, divisions):
             ix = []
+            location_augmented = []
             for label_category in range(len(divisions)):
 
                 indices = np.where(labels==label_category)[0]
@@ -86,28 +79,39 @@ class CLBackgroundDataset:
                 # If samples available < required -> use replacement
                 replacement = True if len(indices) < label_sample_size else False
 
-                indices = np.random.choice(indices, size=label_sample_size, replace=replacement)
+                indices = list(np.random.choice(indices, size=label_sample_size, replace=replacement))
                 ix.extend(indices)
 
-            return data[ix], labels[ix].reshape((-1,1))
+                loc_aug = np.concatenate((indices[1:], indices[0:1]))
+                location_augmented.extend(loc_aug)
 
-    def preprocess(self, data, scaling_filename):
+            ix, location_augmented = shuffle(ix, location_augmented, random_state=0)
+
+            # return data[ix], location_augmented, labels[ix].reshape((-1,1))
+            return ix, location_augmented
+
+    def preprocess(self, scaling_filename):
+
         # Normalizes train and testing features by x' = (x - μ) / σ, where μ, σ are predetermined constants
-        data['x_train'] = zscore_preprocess(data['x_train'], train=True, scaling_file=scaling_filename)
-        data['x_test'] = zscore_preprocess(data['x_test'], scaling_file=scaling_filename)
-        data['x_val'] = zscore_preprocess(data['x_val'], scaling_file=scaling_filename)
-
-        return data
+        self.scaled_dataset['x_train'] = zscore_preprocess(self.data['x_train'], train=True, scaling_file=scaling_filename)
+        self.scaled_dataset['x_test'] = zscore_preprocess(self.data['x_test'], scaling_file=scaling_filename)
+        self.scaled_dataset['x_val'] = zscore_preprocess(self.data['x_val'], scaling_file=scaling_filename)
 
     def save(self, filename):
 
         np.savez(filename,
-            x_train=self.x_train,
-            x_test=self.x_test,
-            x_val=self.x_val,
-            labels_train=self.labels_train,
-            labels_test=self.labels_test,
-            labels_val=self.labels_val,
+            x_train=self.scaled_dataset['x_train'],
+            ix_train=self.scaled_dataset['ix_train'],
+            ixa_train=self.scaled_dataset['ixa_train'],
+            labels_train=self.labels['background_ID_train'],
+            x_test=self.scaled_dataset['x_test'],
+            ix_test=self.scaled_dataset['ix_test'],
+            ixa_test=self.scaled_dataset['ixa_test'],
+            labels_test=self.labels['background_ID_test'],
+            x_val=self.scaled_dataset['x_val'],
+            ix_val=self.scaled_dataset['ix_val'],
+            ixa_val=self.scaled_dataset['ixa_val'],
+            labels_val=self.labels['background_ID_val'],
             )
         print(f'{filename} successfully saved')
 
