@@ -76,7 +76,7 @@ def main(args):
             #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
             embedded_values_aug = model(augmentations.gaussian_resampling_pT(val,device=device, rand_number=42))
             #feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
-            similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,1,96)), embedded_values_aug.reshape((-1,1,96)))
+            similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,96)), embedded_values_aug.reshape((-1,96)))
 
             optimizer.zero_grad()
             similar_embedding_loss.backward()
@@ -107,7 +107,7 @@ def main(args):
             #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
             embedded_values_aug = model(augmentations.gaussian_resampling_pT(val,device=device, rand_number=42))
             #feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
-            similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,1,96)), embedded_values_aug.reshape((-1,1,96)))
+            similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,96)), embedded_values_aug.reshape((-1,96)))
 
             running_sim_loss += similar_embedding_loss.item()
             if idx % 50 == 0:

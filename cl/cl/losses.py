@@ -68,9 +68,11 @@ class VICRegLoss(torch.nn.Module):
         repr_loss = F.mse_loss(x, y)
 
         x_mu = x.mean(dim=0)
-        x_std = x.std(dim=0) + 1e-2
+        #x_std = x.std(dim=0) + 1e-2
+        x_std = torch.sqrt(x.var(dim=0)+1e-4)
         y_mu = y.mean(dim=0)
-        y_std = y.std(dim=0) + 1e-2
+        #y_std = y.std(dim=0) + 1e-2
+        y_std = torch.sqrt(y.var(dim=0)+1e-4)
 
         x = (x - x_mu)
         y = (y - y_mu)
@@ -78,24 +80,69 @@ class VICRegLoss(torch.nn.Module):
         N = x.size(0)
         D = x.size(-1)
 
-        std_loss = torch.mean(F.relu(1 - x_std, inplace=False)) / 2
-        std_loss += torch.mean(F.relu(1 - y_std, inplace=False)) / 2
+        std_loss = torch.mean(F.relu(1 - x_std)) / 2
+        std_loss += torch.mean(F.relu(1 - y_std)) / 2
 
-        cov_x = (x.transpose(1, 2).contiguous() @ x) / (N - 1)
-        cov_y = (y.transpose(1, 2).contiguous() @ y) / (N - 1)
+        #cov_x = (x.transpose(1, 2).contiguous() @ x) / (N - 1)
+        #cov_y = (y.transpose(1, 2).contiguous() @ y) / (N - 1)
+        cov_x = (x.T.contiguous() @ x) / (N - 1)
+        cov_y = (y.T.contiguous() @ y) / (N - 1)
 
         cov_loss = self.off_diagonal(cov_x).pow_(2).sum().div(D)
         cov_loss += self.off_diagonal(cov_y).pow_(2).sum().div(D)
 
-        return 1.0*repr_loss + 1.0*cov_loss + 1.0*std_loss
+        loss = 25.0*repr_loss + 1.0*cov_loss + 25.0*std_loss
+
+        return loss
 
     def off_diagonal(self, x):
-        num_batch, n, m = x.shape
+        #num_batch, n, m = x.shape
+        n, m = x.shape
         assert n == m
         # All off diagonal elements from complete batch flattened
-        return x.flatten(start_dim=1)[...,:-1].view(num_batch, n - 1, n + 1)[...,1:].flatten()
+        #return x.flatten(start_dim=1)[...,:-1].view(num_batch, n - 1, n + 1)[...,1:].flatten()
+        return x.flatten()[...,:-1].view(n - 1, n + 1)[...,1:].flatten()
 
+""" #Original pytorch implementation of VICReg: https://github.com/facebookresearch/vicreg/tree/main.
+    def __init__(self):
+        super().__init__()
+        self.sim_coeff = 25.0
+        self.std_coeff = 25.0
+        self.cov_coeff = 1.0
 
+    def forward(self, x, y):
+        self.batch_size = x.shape[0]
+        self.num_features = x.shape[-1]
+
+        repr_loss = F.mse_loss(x, y)
+
+        x = x - x.mean(dim=0)
+        y = y - y.mean(dim=0)
+
+        std_x = torch.sqrt(x.var(dim=0) + 0.0001)
+        std_y = torch.sqrt(y.var(dim=0) + 0.0001)
+        std_loss = torch.mean(F.relu(1 - std_x)) / 2 + torch.mean(F.relu(1 - std_y)) / 2
+
+        cov_x = (x.T @ x) / (self.batch_size - 1)
+        cov_y = (y.T @ y) / (self.batch_size - 1)
+        cov_loss = self.off_diagonal(cov_x).pow_(2).sum().div(
+            self.num_features
+        ) + self.off_diagonal(cov_y).pow_(2).sum().div(self.num_features)
+
+        loss = (
+            self.sim_coeff * repr_loss
+            + self.std_coeff * std_loss
+            + self.cov_coeff * cov_loss
+        )
+
+        return loss
+    
+    def off_diagonal(self, x):
+        n, m = x.shape
+        assert n == m
+        return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten() """
+
+    
 class SimCLRloss_nolabels_fast(torch.nn.Module):
     """
     Implement (hopefully) faster version of the unsupervised loss in SimCLR.

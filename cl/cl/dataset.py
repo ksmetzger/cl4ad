@@ -194,15 +194,17 @@ class CLSignalDataset:
         self.device = device
 
     def create_labels(self):
+        labels = dict()
         for i_key, key in enumerate(self.data.keys()):
 
             anomaly_dataset_i = self.data[key][:]
             print(f"making datasets for {key} anomaly with shape {anomaly_dataset_i.shape}")
 
             # Predicts anomaly_dataset_i using encoder and defines anomalous labels as 4.0
-            self.labels[key] = np.empty((anomaly_dataset_i.shape[0],1))
-            self.labels[key].fill(4+i_key)
-
+            labels[key] = np.empty((anomaly_dataset_i.shape[0],1))
+            labels[key].fill(4+i_key)
+        return labels
+    
     def save_embedding(self, filename, model):
         # Create and save new .npz with extracted features. Reports success
         for k in self.scaled_dataset.copy().keys():
@@ -261,16 +263,21 @@ class CLBackgroundSignalDataset:
             if 'label' not in k:
                 self.signal_dict[k+"_train"], self.signal_dict[k+"_test"], self.signal_dict[k+"_val"] = np.split(shuffle(signal_dataset.scaled_dataset[k], random_state=rand_number), 
                         [int(.6*len(self.scaled_dataset_signal[k])), int(.8*len(self.scaled_dataset_signal[k]))])
+            if 'label' in k:
+                self.signal_dict[k+"_train"], self.signal_dict[k+"_test"], self.signal_dict[k+"_val"] = np.split(shuffle(signal_dataset.scaled_dataset[k], random_state=rand_number), 
+                        [int(.6*len(self.scaled_dataset_signal[k])), int(.8*len(self.scaled_dataset_signal[k]))])
         for k in self.scaled_dataset_signal:
             if 'label' not in k:
                 self.x_train = np.concatenate((self.x_train, self.signal_dict[k+"_train"]), axis=0)                                                              
                 self.x_test = np.concatenate((self.x_test, self.signal_dict[k+"_test"]), axis=0)
                 self.x_val = np.concatenate((self.x_val, self.signal_dict[k+"_val"]), axis=0)
             if 'label' in k:
-                self.labels_train = np.concatenate((self.labels_train, self.signal_dict["labels_"+k][0:len(self.signal_dict[k+"_train"])]), axis=0)                                                              
-                self.labels_test = np.concatenate((self.labels_test, self.signal_dict["labels_"+k][0:len(self.signal_dict[k+"_test"])]), axis=0)
-                self.labels_val = np.concatenate((self.labels_val, self.signal_dict["labels_"+k][0:len(self.signal_dict[k+"_val"])]), axis=0)
-        self.x_train, self.labels_train, self.x_test, self.labels_test, self.x_val, self.labels_val = shuffle(self.x_train, self.labels_train, random_state=rand_number), shuffle(self.x_test, self.labels_test, random_state=rand_number), shuffle(self.x_val, self.labels_val, random_state=rand_number)
+                self.labels_train = np.concatenate((self.labels_train, self.signal_dict[k+"_train"]), axis=0)                                                              
+                self.labels_test = np.concatenate((self.labels_test, self.signal_dict[k+"_test"]), axis=0)
+                self.labels_val = np.concatenate((self.labels_val, self.signal_dict[k+"_val"]), axis=0)
+        self.x_train, self.labels_train = shuffle(self.x_train, self.labels_train, random_state=rand_number)
+        self.x_test, self.labels_test = shuffle(self.x_test, self.labels_test, random_state=rand_number)
+        self.x_val, self.labels_val = shuffle(self.x_val, self.labels_val, random_state=rand_number)
 
     def report_specs(self):
         '''
@@ -294,4 +301,5 @@ class CLBackgroundSignalDataset:
                 label_counts = labels.astype(int)
                 label_counts = np.bincount(label_counts)
                 for label, count in enumerate(label_counts):
-                    print(f"Label {label, NAME_MAPPINGS[label]}: {count} occurances")
+                    if count != 0:
+                        print(f"Label {label, NAME_MAPPINGS[label]}: {count} occurances")

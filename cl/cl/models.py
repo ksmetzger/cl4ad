@@ -72,9 +72,11 @@ class SimpleDense(torch.nn.Module):
             nn.Linear(57,52),
             nn.BatchNorm1d(52),
             nn.LeakyReLU(),
+            #nn.Dropout(p=0.2),                       #Try with dropout for VICReg
             nn.Linear(52,self.latent_dim),
             nn.BatchNorm1d(self.latent_dim),
-            nn.LeakyReLU()
+            nn.LeakyReLU(),
+            #nn.Dropout(p=0.2),                       #Try with dropout for VICReg
 
         )
         self.expander = torch.nn.Sequential(
