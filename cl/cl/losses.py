@@ -66,12 +66,10 @@ class VICRegLoss(torch.nn.Module):
 
     def forward(self, x, y):
         repr_loss = F.mse_loss(x, y)
-
+        
         x_mu = x.mean(dim=0)
-        #x_std = x.std(dim=0) + 1e-2
         x_std = torch.sqrt(x.var(dim=0)+1e-4)
         y_mu = y.mean(dim=0)
-        #y_std = y.std(dim=0) + 1e-2
         y_std = torch.sqrt(y.var(dim=0)+1e-4)
 
         x = (x - x_mu)
@@ -83,15 +81,17 @@ class VICRegLoss(torch.nn.Module):
         std_loss = torch.mean(F.relu(1 - x_std)) / 2
         std_loss += torch.mean(F.relu(1 - y_std)) / 2
 
-        #cov_x = (x.transpose(1, 2).contiguous() @ x) / (N - 1)
-        #cov_y = (y.transpose(1, 2).contiguous() @ y) / (N - 1)
         cov_x = (x.T.contiguous() @ x) / (N - 1)
         cov_y = (y.T.contiguous() @ y) / (N - 1)
 
         cov_loss = self.off_diagonal(cov_x).pow_(2).sum().div(D)
         cov_loss += self.off_diagonal(cov_y).pow_(2).sum().div(D)
 
-        loss = 25.0*repr_loss + 1.0*cov_loss + 25.0*std_loss
+        weighted_inv = repr_loss * 25. # * self.hparams.invariance_loss_weight
+        weighted_var = std_loss * 25. # self.hparams.variance_loss_weight
+        weighted_cov = cov_loss * 1. #self.hparams.covariance_loss_weight
+
+        loss = weighted_inv + weighted_var + weighted_cov
 
         return loss
 

@@ -72,6 +72,22 @@ def main(args):
     np.savez(args.output_filename, **datasets)
 
 
+    def save(self, filename, model):
+        # Create and save new .npz with extracted features. Reports success
+        self.scaled_dataset['embedding_train'] = model.representation(
+                torch.from_numpy(self.scaled_dataset['x_train']
+                    ).to(dtype=torch.float32, device=self.device)).cpu().detach().numpy()
+        self.scaled_dataset['embedding_test'] = model.representation(
+                torch.from_numpy(self.scaled_dataset['x_test']
+                    ).to(dtype=torch.float32, device=self.device)).cpu().detach().numpy()
+        self.scaled_dataset['embedding_val'] = model.representation(
+                torch.from_numpy(self.scaled_dataset['x_val']
+                    ).to(dtype=torch.float32, device=self.device)).cpu().detach().numpy()
+
+        np.savez(filename, **self.scaled_dataset)
+        print(f'{filename} successfully saved')
+
+
 if __name__ == '__main__':
     #Parses terminal command
     parser = ArgumentParser()
