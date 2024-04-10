@@ -11,3 +11,5 @@ src/*.pdf
 output
 deep/
 .snakemake/
+results
+latent

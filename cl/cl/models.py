@@ -62,4 +62,78 @@ class CVAE(torch.nn.Module):
 
         return z_proj
 
+class SimpleDense(torch.nn.Module):
+    def __init__(self, latent_dim = 48, expanded_dim = 96):
+        super(SimpleDense, self).__init__()
+        self.latent_dim = latent_dim
+        self.expanded_dim = expanded_dim
+
+        self.encoder = torch.nn.Sequential(
+            nn.Linear(57,52),
+            nn.BatchNorm1d(52),
+            nn.LeakyReLU(),
+            #nn.Dropout(p=0.2),                       #Try with dropout for VICReg
+            nn.Linear(52,self.latent_dim),
+            nn.BatchNorm1d(self.latent_dim),
+            nn.LeakyReLU(),
+            #nn.Dropout(p=0.2),                       #Try with dropout for VICReg
+
+        )
+        self.expander = torch.nn.Sequential(
+            nn.Linear(self.latent_dim,72),
+            nn.BatchNorm1d(72),
+            nn.LeakyReLU(),
+            nn.Linear(72,self.expanded_dim)
+        )
+    def representation(self, x):
+        y = self.encoder(x)
+        return y
     
+    def forward(self, x):
+        y = self.representation(x)
+        z = self.expander(y)
+        return z
+#similar implementation to https://github.com/fastmachinelearning/l1-jet-id/blob/main/deepsets/deepsets/deepsets.py
+class DeepSets(torch.nn.Module):
+    def __init__(self, latent_dim=48, expanded_dim=96):
+        super(DeepSets, self).__init__()
+        self.latent_dim = latent_dim
+        self.expanded_dim = expanded_dim
+        self.phi = torch.nn.Sequential(
+            nn.Linear(3,32),
+            #nn.BatchNorm1d(32),    #BatchNorm does not work on 2d input -> pot. switch to batchnorm2d
+            nn.LeakyReLU(),
+            #nn.Dropout1d(),        #Using dropout everywhere the loss does not decrease at all!
+            nn.Linear(32,32),
+            #nn.BatchNorm1d(32),
+            nn.LeakyReLU(),
+            #nn.Dropout1d(),
+            nn.Linear(32,32),
+            #nn.BatchNorm1d(32),
+            nn.LeakyReLU()
+        )
+        self.rho = torch.nn.Sequential(
+            nn.Linear(32,32),
+            nn.BatchNorm1d(32),     #Without batchnorm in rho/expander the validation loss is diverging.
+            nn.LeakyReLU(),
+            #nn.Dropout1d(),
+            nn.Linear(32,self.latent_dim),
+            nn.BatchNorm1d(self.latent_dim),
+            nn.LeakyReLU()
+        )
+        self.expander = torch.nn.Sequential(
+            nn.Linear(self.latent_dim,72),
+            nn.BatchNorm1d(72),
+            nn.LeakyReLU(),
+            nn.Linear(72,self.expanded_dim)
+        )
+    def representation(self, x):
+        phi_out = self.phi(x)
+        sum_out  = torch.mean(phi_out, dim = 1) 
+        rho_out = self.rho(sum_out)
+        return rho_out
+    
+    def forward(self, x):
+        y = self.representation(x)
+        z = self.expander(y)
+        return z

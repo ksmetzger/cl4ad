@@ -103,8 +103,8 @@ def main(args):
             embedded_values_orig = model(val)
             embedded_values_aug = model(val_aug)
 
-            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,1,6)), \
-                embedded_values_orig.reshape((-1,1,6)))
+            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,6)), \
+                embedded_values_orig.reshape((-1,6)))
 
             optimizer.zero_grad()
             similar_embedding_loss.backward()
@@ -130,8 +130,8 @@ def main(args):
             embedded_values_orig = model(val)
             embedded_values_aug = model(val_aug)
 
-            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,1,6)), \
-                embedded_values_orig.reshape((-1,1,6)))
+            similar_embedding_loss = criterion(embedded_values_aug.reshape((-1,6)), \
+                embedded_values_orig.reshape((-1,6)))
 
             running_sim_loss += similar_embedding_loss.item()
             if idx % 500 == 0:

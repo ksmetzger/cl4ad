@@ -65,40 +65,178 @@ class VICRegLoss(torch.nn.Module):
         super().__init__()
 
     def forward(self, x, y):
-
+        repr_loss = F.mse_loss(x, y)
+        
         x_mu = x.mean(dim=0)
+        x_std = torch.sqrt(x.var(dim=0)+1e-4)
         y_mu = y.mean(dim=0)
+        y_std = torch.sqrt(y.var(dim=0)+1e-4)
+
         x = (x - x_mu)
         y = (y - y_mu)
 
-        loss_inv = F.mse_loss(x, y)
-
-        std_x = torch.sqrt(x.var(dim=0) + 1e-2)
-        std_y = torch.sqrt(y.var(dim=0) + 1e-2)
-        loss_x = torch.mean(F.relu(1 - std_x))
-        loss_y = torch.mean(F.relu(1 - std_y))
-        loss_var = loss_x + loss_y
-
         N = x.size(0)
         D = x.size(-1)
-        cov_x = (x.transpose(1, 2).contiguous() @ x) / (N - 1)
-        cov_y = (y.transpose(1, 2).contiguous() @ y) / (N - 1)
-        loss_cov = self.off_diagonal(cov_x).pow_(2).sum().div(D)
-        loss_cov += self.off_diagonal(cov_y).pow_(2).sum().div(D)
 
-        weighted_inv = loss_inv * 25 # * self.hparams.invariance_loss_weight
-        weighted_var = loss_var * 25 # self.hparams.variance_loss_weight
-        weighted_cov = loss_cov * 1 #self.hparams.covariance_loss_weight
+        std_loss = torch.mean(F.relu(1 - x_std)) / 2
+        std_loss += torch.mean(F.relu(1 - y_std)) / 2
+
+        cov_x = (x.T.contiguous() @ x) / (N - 1)
+        cov_y = (y.T.contiguous() @ y) / (N - 1)
+
+        cov_loss = self.off_diagonal(cov_x).pow_(2).sum().div(D)
+        cov_loss += self.off_diagonal(cov_y).pow_(2).sum().div(D)
+
+        weighted_inv = repr_loss * 25. # * self.hparams.invariance_loss_weight
+        weighted_var = std_loss * 25. # self.hparams.variance_loss_weight
+        weighted_cov = cov_loss * 1. #self.hparams.covariance_loss_weight
 
         loss = weighted_inv + weighted_var + weighted_cov
 
         return loss
 
     def off_diagonal(self, x):
-        num_batch, n, m = x.shape
+        #num_batch, n, m = x.shape
+        n, m = x.shape
         assert n == m
         # All off diagonal elements from complete batch flattened
-        return x.flatten(start_dim=1)[...,:-1].view(num_batch, n - 1, n + 1)[...,1:].flatten()
+        #return x.flatten(start_dim=1)[...,:-1].view(num_batch, n - 1, n + 1)[...,1:].flatten()
+        return x.flatten()[...,:-1].view(n - 1, n + 1)[...,1:].flatten()
+
+""" #Original pytorch implementation of VICReg: https://github.com/facebookresearch/vicreg/tree/main.
+    def __init__(self):
+        super().__init__()
+        self.sim_coeff = 25.0
+        self.std_coeff = 25.0
+        self.cov_coeff = 1.0
+
+    def forward(self, x, y):
+        self.batch_size = x.shape[0]
+        self.num_features = x.shape[-1]
+
+        repr_loss = F.mse_loss(x, y)
+
+        x = x - x.mean(dim=0)
+        y = y - y.mean(dim=0)
+
+        std_x = torch.sqrt(x.var(dim=0) + 0.0001)
+        std_y = torch.sqrt(y.var(dim=0) + 0.0001)
+        std_loss = torch.mean(F.relu(1 - std_x)) / 2 + torch.mean(F.relu(1 - std_y)) / 2
+
+        cov_x = (x.T @ x) / (self.batch_size - 1)
+        cov_y = (y.T @ y) / (self.batch_size - 1)
+        cov_loss = self.off_diagonal(cov_x).pow_(2).sum().div(
+            self.num_features
+        ) + self.off_diagonal(cov_y).pow_(2).sum().div(self.num_features)
+
+        loss = (
+            self.sim_coeff * repr_loss
+            + self.std_coeff * std_loss
+            + self.cov_coeff * cov_loss
+        )
+
+        return loss
+    
+    def off_diagonal(self, x):
+        n, m = x.shape
+        assert n == m
+        return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten() """
+
+    
+class SimCLRloss_nolabels_fast(torch.nn.Module):
+    """
+    Implement (hopefully) faster version of the unsupervised loss in SimCLR.
+    see https://arxiv.org/pdf/2002.05709.pdf
+    Implementation from https://github.com/HobbitLong/SupContrast/blob/master/losses.py.
+    """
+    def __init__(self, temperature=0.07,contrast_mode='one',
+                 base_temperature=0.07):
+        super(SimCLRloss_nolabels_fast, self).__init__()
+        self.temperature = temperature
+        self.contrast_mode = contrast_mode
+        self.base_temperature = base_temperature
+
+    def forward(self, features, labels=None, mask=None):
+        """
+        Args:
+            features: hidden vector of shape [bsz, n_views, ...].
+            labels: ground truth of shape [bsz].
+            mask: contrastive mask of shape [bsz, bsz], mask_{i,j}=1 if sample j
+                has the same class as sample i. Can be asymmetric.
+        Returns:
+            A loss scalar.
+        """
+        device = (torch.device('cuda')
+                  if features.is_cuda
+                  else torch.device('cpu'))
+        #Normalize features
+        features = F.normalize(features, p=2, dim=2)
+        
+        if len(features.shape) < 3:
+            raise ValueError('`features` needs to be [bsz, n_views, ...],'
+                             'at least 3 dimensions are required')
+        if len(features.shape) > 3:
+            features = features.view(features.shape[0], features.shape[1], -1)
+
+        batch_size = features.shape[0]
+        if labels is not None and mask is not None:
+            raise ValueError('Cannot define both `labels` and `mask`')
+        elif labels is None and mask is None:
+            mask = torch.eye(batch_size, dtype=torch.float32).to(device)
+        elif labels is not None:
+            labels = labels.contiguous().view(-1, 1)
+            if labels.shape[0] != batch_size:
+                raise ValueError('Num of labels does not match num of features')
+            mask = torch.eq(labels, labels.T).float().to(device)
+        else:
+            mask = mask.float().to(device)
+
+        contrast_count = features.shape[1]
+        contrast_feature = torch.cat(torch.unbind(features, dim=1), dim=0)
+        if self.contrast_mode == 'one':
+            anchor_feature = features[:, 0]
+            anchor_count = 1
+        elif self.contrast_mode == 'all':
+            anchor_feature = contrast_feature
+            anchor_count = contrast_count
+        else:
+            raise ValueError('Unknown mode: {}'.format(self.contrast_mode))
+
+        # compute logits
+        anchor_dot_contrast = torch.div(
+            torch.matmul(anchor_feature, contrast_feature.T),
+            self.temperature)
+        # for numerical stability
+        logits_max, _ = torch.max(anchor_dot_contrast, dim=1, keepdim=True)
+        logits = anchor_dot_contrast - logits_max.detach()
+
+        # tile mask
+        mask = mask.repeat(anchor_count, contrast_count)
+        # mask-out self-contrast cases
+        logits_mask = torch.scatter(
+            torch.ones_like(mask),
+            1,
+            torch.arange(batch_size * anchor_count).view(-1, 1).to(device),
+            0
+        )
+        mask = mask * logits_mask
+
+        # compute log_prob
+        exp_logits = torch.exp(logits) * logits_mask
+        log_prob = logits - torch.log(exp_logits.sum(1, keepdim=True))
+
+        # compute mean of log-likelihood over positive
+        # modified to handle edge cases when there is no positive pair
+        # for an anchor point. 
+        mask_pos_pairs = mask.sum(1)
+        mask_pos_pairs = torch.where(mask_pos_pairs < 1e-6, 1, mask_pos_pairs)
+        mean_log_prob_pos = (mask * log_prob).sum(1) / mask_pos_pairs
+
+        # loss
+        loss = - (self.temperature / self.base_temperature) * mean_log_prob_pos
+        loss = loss.view(anchor_count, batch_size).mean()
+
+        return loss
 
 
 # import tensorflow as tf
