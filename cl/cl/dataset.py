@@ -106,17 +106,17 @@ class CLBackgroundDataset:
         # Create and save new .npz with extracted features. Reports success
         reduced_x_train = np.array_split(self.scaled_dataset['x_train'],5)
         reduced_embedding_train = [model.representation(
-                torch.from_numpy(data.reshape(-1,19,3)
+                torch.from_numpy(data.reshape(-1,57)
                     ).to(dtype=torch.float32, device=self.device)).cpu().detach().numpy() for data in reduced_x_train]
         self.scaled_dataset['embedding_train'] = np.concatenate(reduced_embedding_train, axis=0)
         reduced_x_test = np.array_split(self.scaled_dataset['x_test'],3)
         reduced_embedding_test = [model.representation(
-                torch.from_numpy(data.reshape(-1,19,3)
+                torch.from_numpy(data.reshape(-1,57)
                     ).to(dtype=torch.float32, device=self.device)).cpu().detach().numpy() for data in reduced_x_test]
         self.scaled_dataset['embedding_test'] = np.concatenate(reduced_embedding_test, axis=0)
         reduced_x_val = np.array_split(self.scaled_dataset['x_val'],3)
         reduced_embedding_val = [model.representation(
-                torch.from_numpy(data.reshape(-1,19,3)
+                torch.from_numpy(data.reshape(-1,57)
                     ).to(dtype=torch.float32, device=self.device)).cpu().detach().numpy() for data in reduced_x_val]
         self.scaled_dataset['embedding_val'] = np.concatenate(reduced_embedding_val, axis=0)
 
@@ -209,7 +209,7 @@ class CLSignalDataset:
         # Create and save new .npz with extracted features. Reports success
         for k in self.scaled_dataset.copy().keys():
             if 'label' not in k:
-                self.scaled_dataset['embedding_'+k] = model.representation(torch.from_numpy(self.scaled_dataset[k].reshape(-1,19,3)).to(dtype=torch.float32, device=self.device)).cpu().detach().numpy()
+                self.scaled_dataset['embedding_'+k] = model.representation(torch.from_numpy(self.scaled_dataset[k].reshape(-1,57)).to(dtype=torch.float32, device=self.device)).cpu().detach().numpy()
 
         np.savez(filename, **self.scaled_dataset)
         print(f'{filename} successfully saved')

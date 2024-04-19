@@ -137,3 +137,12 @@ class DeepSets(torch.nn.Module):
         y = self.representation(x)
         z = self.expander(y)
         return z
+    
+class Identity(torch.nn.Module):
+    def __init__(self):
+        super(Identity, self).__init__()
+        self.identity = nn.Identity()
+    def representation(self, x):
+        return self.identity(x)
+    def forward(self, x):
+        return self.representation(x)

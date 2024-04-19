@@ -326,10 +326,10 @@ class BACKGROUND_SIGNAL_DENSE_LATENT(Dataset):
     def __init__(self, root, datatype, rand_number=0, transform=None, target_transform=None):
         
         #Import the background + signals + labels
-        drive_path = 'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\'
+        drive_path = 'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\output\\runs14\\'
         
-        dataset = np.load(drive_path+'output/embedding_deepsets_simclr.npz')
-        dataset_signal = np.load(drive_path+'output/anomalies_embedding_deepsets_simclr.npz')
+        dataset = np.load(drive_path+'embedding.npz')
+        dataset_signal = np.load(drive_path+'anomalies_embedding.npz')
         
         background_data = dataset['embedding_train']
         background_targets = dataset['labels_train']
