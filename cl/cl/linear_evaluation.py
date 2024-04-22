@@ -34,6 +34,7 @@ def get_arguments():
     parser.add_argument("--arch", type=str, default="SimpleDense", help="Type of model used to train embedding (backbone)")
     parser.add_argument("--num-classes", default=8, type=int, help="number of classes (background + signals)")
     parser.add_argument("--type", default="freeze", type=str, choices=("freeze", "finetune"), help="Whether to freeze weights and train full data on linear layer or finetune the model with a semi-supervised approach.")
+    parser.add_argument("--percent", default=1, type=int, choices=(1,10), help="If finetune, choose percentage of labeled train data the model is finetuned on.")
     return parser
 
 
@@ -45,7 +46,12 @@ def main():
     print(f'Using {device}')
 
     #Stats file
-    stats_file = open("output/stats.txt", "a", buffering=1)
+    if args.type == "freeze":
+        stats_file = open("output/stats.txt", "a", buffering=1)
+    elif args.type == "finetune":
+        stats_file = open("output/stats_finetuned.txt", "a", buffering=1)
+    else:
+        assert False
     print(" ".join(sys.argv))
     print(" ".join(sys.argv), file=stats_file)
     best_acc = argparse.Namespace(top1=0, top5=0)
@@ -78,25 +84,33 @@ def main():
     head.weight.data.normal_(mean=0.0, std=0.01)
     head.bias.data.zero_()
 
-    backbone.requires_grad_(False)
-    head.requires_grad_(True)
+    if args.type == "freeze":
+        backbone.requires_grad_(False)
+        head.requires_grad_(True)
     
     backbone.to(device=device)
     head.to(device=device)
     summary(backbone, input_size=(57,))
     summary(head, input_size=(embed_dim,))
 
+    #For semi-supervised fine-tuning create {percent} of the original x_train
+    if args.type == "finetune":
+        idx_percent = np.random.choice(dataset.labels_train.shape[0], size = int(args.percent/100*dataset.labels_train.shape[0]) ,replace=False) #Already seeded from dataset call
+        dataset.x_train = dataset.x_train[idx_percent]
+        dataset.labels_train = dataset.labels_train[idx_percent]
+
+
     #Dataloaders
     train_data_loader = DataLoader(
         TorchCLDataset(dataset.x_train, dataset.labels_train, device),
         batch_size=args.batch_size,
         shuffle=True)
-    
+    print("Length of the train Dataloader: ",len(train_data_loader))
     val_data_loader = DataLoader(
         TorchCLDataset(dataset.x_val, dataset.labels_val, device),
         batch_size=args.batch_size,
         shuffle=True)
-    
+    print("Length of the val Dataloader: ",len(val_data_loader))
     #Loss function set to the standard CrossEntropyLoss
     criterion = nn.CrossEntropyLoss().to(device=device)
     optimizer = torch.optim.SGD(head.parameters(), lr=1e-3, weight_decay=args.weight_decay)
@@ -104,17 +118,27 @@ def main():
 
     start_time = time.time()
     for epoch in range(args.epochs):
-        backbone.eval()
-        head.eval()
+        if args.type == "freeze":
+            backbone.eval()
+            head.eval()
+            freq = 500
+        elif args.type == "finetune":
+            backbone.train()
+            head.train()
+            freq = int(500/100*args.percent)
+        else:
+            assert False
+
         #Train
         for step, (data, target) in enumerate(train_data_loader, start = epoch*len(train_data_loader)):
             target = target.long()
+            #output = head(backbone.representation(augmentations.naive_masking(data, device=device, rand_number=0))) #Train with the same augmentations as the contrastive objective
             output = head(backbone.representation(data))
             loss = criterion(output, target.reshape(-1))
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            if step % 500 == 0:
+            if step % freq == 0:
                 lr = scheduler.get_last_lr()[0]
                 stats = dict(
                     epoch = epoch,
