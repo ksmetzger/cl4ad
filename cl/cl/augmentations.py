@@ -111,7 +111,7 @@ def hardjet_masking(input_batch, device=None):
     #Calculate deltaR = (delta_phi**2 + delta_eta**2)**(1/2) from first jet
     deltaR = np.sqrt((input_numpy[:,:,1] - input_numpy[:,9,1])**2 + (input_numpy[:,:,2]-input_numpy[:,9,2])**2 + 1e-4)
     mask = np.where(deltaR <= 3.0, True, False)
-    input_numpy[mask] = 0.0
+    input_numpy[~mask] = 0.0
     
     resampled_batch = torch.from_numpy(input_numpy.reshape(-1,57)).to(dtype=torch.float32, device=device)
     return resampled_batch
@@ -133,7 +133,7 @@ def hardlepton_masking(input_batch, device=None):
     #Calculate deltaR = (delta_phi**2 + delta_eta**2)**(1/2) from first jet
     deltaR = np.sqrt((input_numpy[:,:,1] - input_numpy[:,highest_pT_index,1])**2 + (input_numpy[:,:,2]-input_numpy[:,highest_pT_index,2])**2 + 1e-4)
     mask = np.where(deltaR <= 3.0, True, False)
-    input_numpy[mask] = 0.0
+    input_numpy[~mask] = 0.0
     
     resampled_batch = torch.from_numpy(input_numpy.reshape(-1,57)).to(dtype=torch.float32, device=device)
     return resampled_batch

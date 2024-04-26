@@ -186,6 +186,72 @@ class CLSignalDataset:
                 for label, count in enumerate(label_counts):
                     print(f"Label {label, NAME_MAPPINGS[label]}: {count} occurances")
 
+class CLBackgroundSignalDataset:
+    def __init__(self, data_filename, labels_filename, data_filename_signal, preprocess=True, n_events=-1, divisions=[1,1,1,1]):
+        'Initialization'
+        rand_number = 0
+        np.random.seed(rand_number)
+        background_dataset = CLBackgroundDataset(data_filename,labels_filename, preprocess=preprocess,n_events=n_events, divisions=divisions)
+        signal_dataset = CLSignalDataset(data_filename_signal, preprocess=preprocess)
+        self.scaled_dataset_background = background_dataset.scaled_dataset
+        self.scaled_dataset_signal = signal_dataset.scaled_dataset
+        #Combine the datasets for training
+        #Background part
+        self.x_train = self.scaled_dataset_background['x_train'][self.scaled_dataset_background['ix_train']]
+        self.x_test = self.scaled_dataset_background['x_test'][self.scaled_dataset_background['ix_test']]
+        self.x_val = self.scaled_dataset_background['x_val'][self.scaled_dataset_background['ix_val']]
+        self.labels_train = background_dataset.labels['background_ID_train'][self.scaled_dataset_background['ix_train']].reshape((-1,1))
+        self.labels_test = background_dataset.labels['background_ID_test'][self.scaled_dataset_background['ix_test']].reshape((-1,1))
+        self.labels_val = background_dataset.labels['background_ID_val'][self.scaled_dataset_background['ix_val']].reshape((-1,1))
+        #Signal part (Split into train:test:val)
+        self.signal_dict = dict()
+        for k in self.scaled_dataset_signal:
+            if 'label' not in k:
+                self.signal_dict[k+"_train"], self.signal_dict[k+"_test"], self.signal_dict[k+"_val"] = np.split(shuffle(signal_dataset.scaled_dataset[k], random_state=rand_number), 
+                        [int(.6*len(self.scaled_dataset_signal[k])), int(.8*len(self.scaled_dataset_signal[k]))])
+            if 'label' in k:
+                self.signal_dict[k+"_train"], self.signal_dict[k+"_test"], self.signal_dict[k+"_val"] = np.split(shuffle(signal_dataset.scaled_dataset[k], random_state=rand_number), 
+                        [int(.6*len(self.scaled_dataset_signal[k])), int(.8*len(self.scaled_dataset_signal[k]))])
+        for k in self.scaled_dataset_signal:
+            if 'label' not in k:
+                self.x_train = np.concatenate((self.x_train, self.signal_dict[k+"_train"]), axis=0)                                                              
+                self.x_test = np.concatenate((self.x_test, self.signal_dict[k+"_test"]), axis=0)
+                self.x_val = np.concatenate((self.x_val, self.signal_dict[k+"_val"]), axis=0)
+            if 'label' in k:
+                self.labels_train = np.concatenate((self.labels_train, self.signal_dict[k+"_train"]), axis=0)                                                              
+                self.labels_test = np.concatenate((self.labels_test, self.signal_dict[k+"_test"]), axis=0)
+                self.labels_val = np.concatenate((self.labels_val, self.signal_dict[k+"_val"]), axis=0)
+        self.x_train, self.labels_train = shuffle(self.x_train, self.labels_train, random_state=rand_number)
+        self.x_test, self.labels_test = shuffle(self.x_test, self.labels_test, random_state=rand_number)
+        self.x_val, self.labels_val = shuffle(self.x_val, self.labels_val, random_state=rand_number)
+
+    def report_specs(self):
+        '''
+        Reports file specs: keys, shape pairs. If divisions, also reports number of samples from each label represented
+        in dataset
+        '''
+        print('File Specs background:')
+        datasets = ["Train", "Test", "Validation"]
+        for i, k in enumerate([self.labels_train, self.labels_test, self.labels_val]):
+            labels = k.copy()
+            labels = labels.reshape((labels.shape[0],))
+            label_counts = labels.astype(int)
+            label_counts = np.bincount(label_counts)
+            print("================")
+            print(f"{datasets[i]} dataset")
+            for label, count in enumerate(label_counts):
+                print(f"Label {label, NAME_MAPPINGS[label]}: {count} occurances")
+    
+    def save(self, filename):
+        np.savez(filename,
+            x_train=self.x_train,
+            labels_train=self.labels_train,
+            x_test=self.x_test,
+            labels_test=self.labels_test,
+            x_val=self.x_val,
+            labels_val=self.labels_val,
+            )
+        print(f'{filename} successfully saved')
 
 if __name__=='__main__':
 
@@ -212,13 +278,21 @@ if __name__=='__main__':
         divisions=[0.30, 0.30, 0.20, 0.20],
     )
     background_dataset.report_specs()
-    background_dataset.save(args.output_filename)
-
+    #background_dataset.save(args.output_filename)
+    print("=================")
     # prepare signal datasets
     signal_dataset = CLSignalDataset(
         args.anomaly_dataset,
         preprocess=args.scaling_filename
     )
     signal_dataset.report_specs()
-    signal_dataset.save(args.output_anomaly_filename)
-
+    #signal_dataset.save(args.output_anomaly_filename)
+    print("=====================")
+    # prepare combined background + signal dataset for self-supervised training
+    background_signal_dataset = CLBackgroundSignalDataset(
+        args.background_dataset, args.background_ids, args.anomaly_dataset,
+        preprocess=args.scaling_filename, n_events=args.sample_size,
+        divisions=[0.592,0.338,0.067,0.003]
+    )
+    background_signal_dataset.report_specs()
+    #background_signal_dataset.save(args.output_filename)
