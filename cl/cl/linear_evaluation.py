@@ -103,7 +103,7 @@ def main():
     val_data_loader = DataLoader(
         TorchCLDataset(dataset['x_val'], dataset['labels_val'], device),
         batch_size=args.batch_size,
-        shuffle=True)
+        shuffle=False)
     print("Length of the val Dataloader: ",len(val_data_loader))
     #Loss function set to the standard CrossEntropyLoss
     criterion = nn.CrossEntropyLoss().to(device=device)

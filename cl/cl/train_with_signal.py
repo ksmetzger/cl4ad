@@ -145,6 +145,9 @@ def main(args):
     if args.train:
         train_losses = []
         val_losses = []
+        #Initialize the Early Stopper
+        EarlyStopper = EarlyStopping(patience=5, delta=0, path=args.model_name)
+
         for epoch in range(1, args.epochs+1):
             print(f'EPOCH {epoch}')
             #Adjust the learning rate with Version 2 schedule (see OneNote)
@@ -163,9 +166,14 @@ def main(args):
 
             print(f"Train/Val Sim Loss after epoch: {avg_train_loss:.4f}/{avg_val_loss:.4f}")
 
+            #Check whether to EarlyStop
+            EarlyStopper(avg_val_loss, model, epoch)
+            if EarlyStopper.early_stop:
+                break
+
             #scheduler.step()
         writer.flush()
-        torch.save(model.state_dict(), args.model_name)
+        #torch.save(model.state_dict(), args.model_name)
 
         plt.plot(train_losses, label='train')
         plt.plot(val_losses, label='val')
@@ -179,7 +187,18 @@ def main(args):
         model.eval()
 
         #Save the embedding output for the background and signal part
-        #TODO
+        embedding_dict = dict()
+        train_data_loader = DataLoader(
+        TorchCLDataset(dataset['x_train'], dataset['labels_train'], device),
+        batch_size=args.batch_size,
+        shuffle=False)
+        for loader, name in zip([train_data_loader, test_data_loader, val_data_loader],['train','test','val']):
+            with torch.no_grad():
+                embedding = np.concatenate([model.representation(data).cpu().detach().numpy() for (data, label) in loader], axis=0)
+                embedding_dict[f"embedding_{name}"] = embedding
+
+        np.savez(args.output_filename, **embedding_dict)
+        print(f"Successfully saved embedding under {args.output_filename}")
 
 class LARS(torch.optim.Optimizer): #Implementation from https://github.com/facebookresearch/vicreg/blob/main/main_vicreg.py.
     def __init__(
@@ -259,7 +278,45 @@ class TorchCLDataset(Dataset):
         y = self.labels[index]
 
         return X, y
-  
+
+class EarlyStopping:
+    '''Defines an EarlyStopper which stops training when the validation loss does not decrease with certain patience'''
+    def __init__(self, patience=5, delta=0, path='default.pth'):
+        '''
+        Args:
+            patience: How many epochs to wait for val_loss to improve again (default: 5)
+            delta: minimum change in the val_loss metric to qualify as an improvement (default: 0)
+            path: output path of the checkpointed model (default: 'default.pth')
+        '''
+        self.patience = patience
+        self.delta = delta
+        self.path = path
+        
+        self.counter = 0
+        self.min_val_loss = float(np.Inf)
+        self.early_stop = False
+
+    def __call__(self, val_loss, model, epoch):
+        
+        assert(val_loss != np.nan)
+
+        if val_loss < self.min_val_loss - self.delta:
+            self.min_val_loss = val_loss
+            self.counter = 0
+            self.save_checkpoint(model)
+        elif val_loss > self.min_val_loss - self.delta:
+            self.counter += 1
+            print(f"Early Stopper count at {self.counter} out of {self.patience}")
+            if self.counter >= self.patience:
+                self.early_stop = True
+                print(f"Early Stopped at epoch {epoch}! And saved model from epoch {epoch-self.counter} with validation loss {self.min_val_loss}")
+        else:
+            assert(False)
+                
+    def save_checkpoint(self, model):
+        '''Saves the model if the val_loss is decreasing'''
+        torch.save(model.state_dict(), self.path)
+
 if __name__ == '__main__':
     # Parses terminal command
     parser = ArgumentParser()
