@@ -279,7 +279,7 @@ if __name__=='__main__':
     )
     background_dataset.report_specs()
     #background_dataset.save(args.output_filename)
-    print("=================")
+    print("=====================")
     # prepare signal datasets
     signal_dataset = CLSignalDataset(
         args.anomaly_dataset,

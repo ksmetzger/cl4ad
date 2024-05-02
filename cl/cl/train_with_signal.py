@@ -8,7 +8,6 @@ from torch.utils.tensorboard import SummaryWriter
 from torchsummary import summary
 
 import losses
-from dataset import TorchCLDataset, CLBackgroundDataset, CLSignalDataset, CLBackgroundSignalDataset
 from models import CVAE, SimpleDense, DeepSets
 import augmentations
 import math
@@ -22,25 +21,20 @@ def main(args):
     print(f'Using {device}')
 
     #Dataset with signals and original divisions=[0.592,0.338,0.067,0.003]
-    dataset = CLBackgroundSignalDataset(args.background_dataset, args.background_ids, args.anomaly_dataset,
-        preprocess=args.scaling_filename, n_events=args.sample_size,
-        divisions=[0.592,0.338,0.067,0.003],
-        device=device
-    )
-    dataset.report_specs()
+    dataset = np.load(args.dataset)
 
     train_data_loader = DataLoader(
-        TorchCLDataset(dataset.x_train, dataset.labels_train, device),
+        TorchCLDataset(dataset['x_train'], dataset['labels_train'], device),
         batch_size=args.batch_size,
         shuffle=True)
 
     test_data_loader = DataLoader(
-        TorchCLDataset(dataset.x_test, dataset.labels_test, device),
+        TorchCLDataset(dataset['x_test'], dataset['labels_test'], device),
         batch_size=args.batch_size,
         shuffle=False)
 
     val_data_loader = DataLoader(
-        TorchCLDataset(dataset.x_val, dataset.labels_val, device),
+        TorchCLDataset(dataset['x_val'], dataset['labels_val'], device),
         batch_size=args.batch_size,
         shuffle=False)
 
@@ -48,8 +42,8 @@ def main(args):
     summary(model, input_size=(57,))
 
     # criterion = losses.SimCLRLoss()
-    #criterion = losses.VICRegLoss()
-    criterion = losses.SimCLRloss_nolabels_fast()
+    criterion = losses.VICRegLoss()
+    #criterion = losses.SimCLRloss_nolabels_fast()
     #Standard schedule
     """ optimizer = torch.optim.Adam(model.parameters(), lr=1e-2, weight_decay=1e-3) #Adams pytorch impl. of weight decay is equiv. to the L2 penalty.
     scheduler_1 = torch.optim.lr_scheduler.ConstantLR(optimizer, total_iters=5)
@@ -75,15 +69,15 @@ def main(args):
             # embed entire batch with first value of the batch repeated
             #first_val_repeated = val[0].repeat(args.batch_size, 1)
             #For DeepSets needs input shape (bsz, 19 , 3)
-            #embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
-            embedded_values_orig = model(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=0), device=device, rand_number=0))
+            embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
+            #embedded_values_orig = model(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=0), device=device, rand_number=0))
             #embedded_values_aug = model(first_val_repeated)
             #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
-            #embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
-            embedded_values_aug = model(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42))
-            feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
-            #similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,96)), embedded_values_aug.reshape((-1,96)))
-            similar_embedding_loss = criterion(feature)
+            embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
+            #embedded_values_aug = model(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42))
+            #feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
+            similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,96)), embedded_values_aug.reshape((-1,96)))
+            #similar_embedding_loss = criterion(feature)
 
             optimizer.zero_grad()
             similar_embedding_loss.backward()
@@ -102,30 +96,31 @@ def main(args):
         running_sim_loss = 0.
         last_sim_loss = 0.
 
-        for idx, val in enumerate(val_data_loader, 1):
-            val = val[0]
-            if val.shape[0] != args.batch_size:
-                continue
+        with torch.no_grad():
+            for idx, val in enumerate(val_data_loader, 1):
+                val = val[0]
+                if val.shape[0] != args.batch_size:
+                    continue
 
-            #first_val_repeated = val[0].repeat(args.batch_size, 1)
+                #first_val_repeated = val[0].repeat(args.batch_size, 1)
 
-            #embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
-	        #embedded_values_aug = model(first_val_repeated)
-            embedded_values_orig = model(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=0), device=device, rand_number=0))
-            #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
-            #embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
-            embedded_values_aug = model(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42))
-            feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
-            #similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,96)), embedded_values_aug.reshape((-1,96)))
-            similar_embedding_loss = criterion(feature)
+                embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
+                #embedded_values_aug = model(first_val_repeated)
+                #embedded_values_orig = model(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=0), device=device, rand_number=0))
+                #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
+                embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
+                #embedded_values_aug = model(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42))
+                #feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
+                similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,96)), embedded_values_aug.reshape((-1,96)))
+                #similar_embedding_loss = criterion(feature)
 
-            running_sim_loss += similar_embedding_loss.item()
-            if idx % 50 == 0:
-                last_sim_loss = running_sim_loss / 50
-                tb_x = epoch_index * len(val_data_loader) + idx + 1
-                tb_writer.add_scalar('SimLoss/val', last_sim_loss, tb_x)
-                tb_writer.flush()
-                running_sim_loss = 0.
+                running_sim_loss += similar_embedding_loss.item()
+                if idx % 50 == 0:
+                    last_sim_loss = running_sim_loss / 50
+                    tb_x = epoch_index * len(val_data_loader) + idx + 1
+                    tb_writer.add_scalar('SimLoss/val', last_sim_loss, tb_x)
+                    tb_writer.flush()
+                    running_sim_loss = 0.
         tb_writer.flush()
         return last_sim_loss
 
@@ -153,7 +148,7 @@ def main(args):
         for epoch in range(1, args.epochs+1):
             print(f'EPOCH {epoch}')
             #Adjust the learning rate with Version 2 schedule (see OneNote)
-            lr = adjust_learning_rate(args, 10, epoch, optimizer, base_lr=0.2)
+            lr = adjust_learning_rate(args, 10, epoch, optimizer, base_lr=0.025)
             print("current Learning rate: ", lr)
             writer.add_scalar('Learning_rate', lr, epoch)
             # Gradient tracking
@@ -183,13 +178,8 @@ def main(args):
         model.load_state_dict(torch.load(args.model_name, map_location=torch.device(device)))
         model.eval()
 
-        #Save the embedding output seperately for the background and signal part
-        #dataset.save(args.output_filename, model)
-        CLBackgroundDataset(args.background_dataset, args.background_ids, n_events=args.sample_size,
-            preprocess=args.scaling_filename,
-            divisions=[0.592,0.338,0.067,0.003],
-            device=device).save_embedding(args.output_filename, model)
-        CLSignalDataset(args.anomaly_dataset,n_events=args.sample_size, preprocess=args.scaling_filename, device=device).save_embedding(f'output/anomalies_embedding.npz', model)
+        #Save the embedding output for the background and signal part
+        #TODO
 
 class LARS(torch.optim.Optimizer): #Implementation from https://github.com/facebookresearch/vicreg/blob/main/main_vicreg.py.
     def __init__(
@@ -275,9 +265,7 @@ if __name__ == '__main__':
     parser = ArgumentParser()
 
     # If not using full data, name of smaller dataset to pull from
-    parser.add_argument('background_dataset', type=str)
-    parser.add_argument('background_ids', type=str)
-    parser.add_argument('anomaly_dataset', type=str)
+    parser.add_argument('dataset', type=str)
 
     parser.add_argument('--epochs', type=int, default=1)
     parser.add_argument('--batch-size', type=int, default=1024)

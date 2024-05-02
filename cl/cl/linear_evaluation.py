@@ -21,9 +21,8 @@ import sys
 def get_arguments():
     parser = argparse.ArgumentParser(description="Evaluate the linear top1/top5 accuracy given the pretrained embedding")
     
-    parser.add_argument('background_dataset', type=str)
-    parser.add_argument('background_ids', type=str)
-    parser.add_argument('anomaly_dataset', type=str)
+    parser.add_argument('dataset', type=str)
+
     parser.add_argument('--scaling-filename', type=str)
     parser.add_argument('--sample-size', type=int, default=-1)
 
@@ -57,12 +56,7 @@ def main():
     best_acc = argparse.Namespace(top1=0, top5=0)
 
     #Dataset with signals and original divisions=[0.592,0.338,0.067,0.003]
-    dataset = CLBackgroundSignalDataset(args.background_dataset, args.background_ids, args.anomaly_dataset,
-        preprocess=args.scaling_filename, n_events=args.sample_size,
-        divisions=[0.592,0.338,0.067,0.003],
-        device=device
-    )
-    dataset.report_specs()
+    dataset = np.load(args.dataset)
 
     #Get pretrained model
     if args.arch == "SimpleDense":
@@ -102,12 +96,12 @@ def main():
 
     #Dataloaders
     train_data_loader = DataLoader(
-        TorchCLDataset(dataset.x_train, dataset.labels_train, device),
+        TorchCLDataset(dataset['x_train'], dataset['labels_train'], device),
         batch_size=args.batch_size,
         shuffle=True)
     print("Length of the train Dataloader: ",len(train_data_loader))
     val_data_loader = DataLoader(
-        TorchCLDataset(dataset.x_val, dataset.labels_val, device),
+        TorchCLDataset(dataset['x_val'], dataset['labels_val'], device),
         batch_size=args.batch_size,
         shuffle=True)
     print("Length of the val Dataloader: ",len(val_data_loader))
