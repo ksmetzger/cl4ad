@@ -42,8 +42,8 @@ def main(args):
     summary(model, input_size=(57,))
 
     # criterion = losses.SimCLRLoss()
-    criterion = losses.VICRegLoss()
-    #criterion = losses.SimCLRloss_nolabels_fast()
+    #criterion = losses.VICRegLoss()
+    criterion = losses.SimCLRloss_nolabels_fast()
     #Standard schedule
     """ optimizer = torch.optim.Adam(model.parameters(), lr=1e-2, weight_decay=1e-3) #Adams pytorch impl. of weight decay is equiv. to the L2 penalty.
     scheduler_1 = torch.optim.lr_scheduler.ConstantLR(optimizer, total_iters=5)
@@ -69,15 +69,15 @@ def main(args):
             # embed entire batch with first value of the batch repeated
             #first_val_repeated = val[0].repeat(args.batch_size, 1)
             #For DeepSets needs input shape (bsz, 19 , 3)
-            embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
-            #embedded_values_orig = model(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=0), device=device, rand_number=0))
+            #embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
+            embedded_values_orig = model(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=0), device=device, rand_number=0))
             #embedded_values_aug = model(first_val_repeated)
             #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
-            embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
-            #embedded_values_aug = model(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42))
-            #feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
-            similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,96)), embedded_values_aug.reshape((-1,96)))
-            #similar_embedding_loss = criterion(feature)
+            #embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
+            embedded_values_aug = model(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42))
+            feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
+            #similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,96)), embedded_values_aug.reshape((-1,96)))
+            similar_embedding_loss = criterion(feature)
 
             optimizer.zero_grad()
             similar_embedding_loss.backward()
@@ -104,15 +104,15 @@ def main(args):
 
                 #first_val_repeated = val[0].repeat(args.batch_size, 1)
 
-                embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
+                #embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
                 #embedded_values_aug = model(first_val_repeated)
-                #embedded_values_orig = model(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=0), device=device, rand_number=0))
+                embedded_values_orig = model(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=0), device=device, rand_number=0))
                 #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
-                embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
-                #embedded_values_aug = model(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42))
-                #feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
-                similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,96)), embedded_values_aug.reshape((-1,96)))
-                #similar_embedding_loss = criterion(feature)
+                #embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
+                embedded_values_aug = model(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42))
+                feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
+                #similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,96)), embedded_values_aug.reshape((-1,96)))
+                similar_embedding_loss = criterion(feature)
 
                 running_sim_loss += similar_embedding_loss.item()
                 if idx % 50 == 0:
@@ -146,7 +146,7 @@ def main(args):
         train_losses = []
         val_losses = []
         #Initialize the Early Stopper
-        EarlyStopper = EarlyStopping(patience=5, delta=0, path=args.model_name)
+        EarlyStopper = EarlyStopping(patience=5, delta=0, path=args.model_name, verbose=True)
 
         for epoch in range(1, args.epochs+1):
             print(f'EPOCH {epoch}')
@@ -281,16 +281,18 @@ class TorchCLDataset(Dataset):
 
 class EarlyStopping:
     '''Defines an EarlyStopper which stops training when the validation loss does not decrease with certain patience'''
-    def __init__(self, patience=5, delta=0, path='default.pth'):
+    def __init__(self, patience=5, delta=0, path='default.pth', verbose=False):
         '''
         Args:
             patience: How many epochs to wait for val_loss to improve again (default: 5)
             delta: minimum change in the val_loss metric to qualify as an improvement (default: 0)
             path: output path of the checkpointed model (default: 'default.pth')
+            verbose: print everytime the val_loss significantly lowers and the model is saved (default: False)
         '''
         self.patience = patience
         self.delta = delta
         self.path = path
+        self.verbose = verbose
         
         self.counter = 0
         self.min_val_loss = float(np.Inf)
@@ -301,6 +303,8 @@ class EarlyStopping:
         assert(val_loss != np.nan)
 
         if val_loss < self.min_val_loss - self.delta:
+            if self.verbose:
+                print(f"Validation loss lowered from {self.min_val_loss} ---> to {val_loss} and the model was saved!")
             self.min_val_loss = val_loss
             self.counter = 0
             self.save_checkpoint(model)

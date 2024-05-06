@@ -87,7 +87,7 @@ class VICRegLoss(torch.nn.Module):
         cov_loss = self.off_diagonal(cov_x).pow_(2).sum().div(D)
         cov_loss += self.off_diagonal(cov_y).pow_(2).sum().div(D)
 
-        weighted_inv = repr_loss * 5. # * self.hparams.invariance_loss_weight
+        weighted_inv = repr_loss * 25. # * self.hparams.invariance_loss_weight
         weighted_var = std_loss * 25. # self.hparams.variance_loss_weight
         weighted_cov = cov_loss * 25. #self.hparams.covariance_loss_weight
 

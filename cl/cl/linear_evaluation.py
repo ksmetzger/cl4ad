@@ -34,6 +34,8 @@ def get_arguments():
     parser.add_argument("--num-classes", default=8, type=int, help="number of classes (background + signals)")
     parser.add_argument("--type", default="freeze", type=str, choices=("freeze", "finetune"), help="Whether to freeze weights and train full data on linear layer or finetune the model with a semi-supervised approach.")
     parser.add_argument("--percent", default=1, type=int, choices=(1,10), help="If finetune, choose percentage of labeled train data the model is finetuned on.")
+    parser.add_argument('--head-name', type=str, default='output/head.pth')
+    parser.add_argument('--backbone-name', type=str, default='output/backbone_finetuned.pth')
     return parser
 
 
@@ -105,6 +107,11 @@ def main():
         batch_size=args.batch_size,
         shuffle=False)
     print("Length of the val Dataloader: ",len(val_data_loader))
+    test_data_loader = DataLoader(
+        TorchCLDataset(dataset['x_test'], dataset['labels_test'], device),
+        batch_size=args.batch_size,
+        shuffle=False)
+    print("Length of the test Dataloader: ",len(val_data_loader))
     #Loss function set to the standard CrossEntropyLoss
     criterion = nn.CrossEntropyLoss().to(device=device)
     optimizer = torch.optim.SGD(head.parameters(), lr=1e-3, weight_decay=args.weight_decay)
@@ -169,6 +176,26 @@ def main():
 
         scheduler.step()
 
+    #Save the model for inference
+    if args.type == 'freeze':
+        #Just save the head
+        torch.save(head.state_dict(), args.head_name)
+        print(f"Classification head successfully saved!")
+    elif args.type == 'finetune':
+        #Save the finetuned backbone + the classification head
+        torch.save(head.state_dict(), args.head_name)
+        torch.save(backbone.state_dict(), args.backbone_name + '_' +args.percent)
+        print(f"Classification + finetuned backbone (with {args.percent}% labeled data) successfully saved!")
+    
+    #Print the penultimate performance also on the test dataset to confirm the changes made based on the accuracies of the validation dataset
+    top1, top5 = test_accuracy(test_data_loader, backbone, head)
+    stats_test = dict(
+        acc1_on_testset = top1,
+        acc5_on_testset = top5,
+    )
+    print(json.dumps(stats_test), file=stats_file)
+
+
 #Copied straight from: https://github.com/facebookresearch/vicreg/blob/main/evaluate.py
 def accuracy(output, target, topk=(1,)):
     """Computes the accuracy over the k top predictions for the specified values of k"""
@@ -185,6 +212,26 @@ def accuracy(output, target, topk=(1,)):
             correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
             res.append(correct_k.mul_(100.0 / batch_size))
         return res
+    
+#Confirm the accuracy on the test set
+def test_accuracy(dataloader, backbone, head):
+    #Evaluate
+    backbone.eval()
+    head.eval()
+    best_acc = argparse.Namespace(top1=0, top5=0)
+    top1 = AverageMeter("Acc@1")
+    top5 = AverageMeter("Acc@5")
+    with torch.no_grad():
+        for data, target in dataloader:
+            output = head(backbone.representation(data))
+            acc1, acc5, = accuracy(output, target, topk=(1,5))
+            top1.update(acc1[0].item(), data.size(0))
+            top5.update(acc5[0].item(), data.size(0))
+    best_acc.top1 = max(best_acc.top1, top1.avg)
+    best_acc.top5 = max(best_acc.top5, top5.avg)
+    print(f"On the test dataset we get the best accuracies for top-1 {best_acc.top1} and top-5 {best_acc.top5}")
+    return best_acc.top1, best_acc.top5
+
 class AverageMeter(object):
     """Computes and stores the average and current value"""
 
