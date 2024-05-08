@@ -12,6 +12,8 @@ from torch.utils.data import DataLoader, Dataset
 from train_with_signal import TorchCLDataset
 import torch.nn as nn
 import torch.nn.functional as F
+import seaborn as sns
+import pandas as pd
 
 #Define color and name dicts
 #Dictionary for the targets (colors)
@@ -78,7 +80,7 @@ def tSNE(embedding, labels, title, filename, namedir, dict_labels_color, dict_la
     
     plt.title(title)
     plt.savefig(results_dir + filename ,dpi=300)
-    plt.show()
+    plt.show(block=False)
 
 #From graphing_module.py
 def plot_ROC(predictions, labels, filename, title, folder='plots'): 
@@ -180,7 +182,78 @@ def plot_PCA(representations, labels, title, filename, dict_labels_color, dict_l
     plt.savefig(file_path) 
     plt.close('all')
     print(f"PCA Plot saved at '{filename}'")
-     
+
+def corner_plot(embedding, labels, title, filename, dict_labels_color, dict_labels_names, pca=True, normalize=True, background='one', anomalies=['leptoquark', 'ato4l', 'hChToTauNu', 'hToTauTau'], folder='plots', rand_number=0):
+    '''
+    Plot a corner plot visualizing the embedding
+    pca: Plot 3D-PCA reduced input instead of latent space
+    normalize: Upsample anomalies with replacement in order to normalize the histograms/kde plots
+    background: 'detail' plots all the different SM background classes with different colors, 'one' combines all background classes as one (default: 'one')
+    anomalies: array with all of the anomaly names for plotting (default: ['leptoquark', 'ato4l', 'hChToTauNu', 'hToTauTau']) 
+    '''
+    print("Plotting Corner Plots!")
+    if pca==True:
+        pca = PCA(n_components=3, random_state=rand_number) 
+        embedding = pca.fit_transform(embedding)
+    print(f"Input shape of the embedding: {np.shape(embedding)}")
+    #Create dict needed for seaborn input using the 3D-embedding and type
+    def sns_dict(embedding, label_name):
+        sns_dict = {}
+        sns_dict["label"] = [label_name] * len(embedding)
+        for i in range(np.shape(embedding)[1]): #Iterate through dimensions of the embedding
+            sns_dict["Dimension {}".format(i+1)] = embedding[:,i]
+        return sns_dict
+    background_df = pd.DataFrame()
+    anomaly_df = pd.DataFrame()
+    #Background part
+    if background=='one':
+        mask = (labels < 4).reshape(-1)
+        background_embed = embedding[mask]
+        background_df = pd.concat([background_df, pd.DataFrame(sns_dict(background_embed, "SM-background"))])
+    elif background == 'detail':
+        for i in range(4): #Iterate through background classes
+            mask = (labels == i).reshape(-1)
+            background_embed = embedding[mask]
+            background_df = pd.concat([background_df, pd.DataFrame(sns_dict(background_embed, dict_labels_names[i]))])
+    else:
+        assert False
+    #Anomaly part
+    for anomaly in anomalies:
+        mask = (labels == list(dict_labels_names.keys())[list(dict_labels_names.values()).index(anomaly)]).reshape(-1) #Get label for the corr. anomaly
+        anomaly_embed = embedding[mask]
+        """ sns_dict["label"] = [anomaly] * np.sum(mask)
+        for i in range(np.shape(embedding)[1]): #Iterate through dimensions of the embedding
+                sns_dict["Dimension {}".format(i+1)] = anomaly_embed[:,i] """
+        anomaly_df = pd.concat([anomaly_df, pd.DataFrame(sns_dict(anomaly_embed, anomaly))])
+    
+    #Scale the anomaly up with replacement if normalize = True
+    if normalize:
+        frac = float(background_df.shape[0]/anomaly_df.shape[0])
+        anomaly_df = anomaly_df.sample(frac=frac, replace=True ,random_state=rand_number)
+
+    #Append background and anomaly DataFrame
+    df = pd.concat([background_df, anomaly_df])
+
+    #Get color palette
+    color_dict = {}
+    for i in dict_labels_color.keys():
+        color_dict[dict_labels_names[i]] = dict_labels_color[i]
+    color_dict["SM-background"] = 'grey'
+
+    #Create cornerplot (pairplot)
+    corner = sns.pairplot(df, hue="label", kind='kde', palette=color_dict, corner=True)
+    corner.figure.suptitle(title)
+    plt.show(block=False)
+
+    # Saves plot and reports success 
+    subfolder = os.path.dirname(__file__)
+    subfolder = os.path.join(subfolder, folder)
+    os.makedirs(subfolder, exist_ok=True)
+    file_path = os.path.join(subfolder, filename)
+    corner.savefig(file_path) 
+    plt.close('all')
+    print(f"Corner Plot saved at '{filename}'")
+
 
 #Define inference if there is no embedding.npz already saved, in order to use for plots of the embedding
 def inference(model_name, input_data, input_labels, device=None):
@@ -256,7 +329,7 @@ def main():
     #embedded_test = embedding['embedding_test']
     labels_test = data['labels_test']
     data_test = data['x_test'].reshape(-1,57)
-    embedded_test = inference('output/runs36/vae.pth', data_test, labels_test)
+    embedded_test = inference('output/runs29/vae.pth', data_test, labels_test)
 
     #Plot t-SNE
     def plot_tsne():
@@ -289,9 +362,26 @@ def main():
         plot_PCA(data_test[idx], labels[idx], f'{dimension}D PCA of 57D test data', f'{dimension}D PCA of 57D test data.pdf',
                  dict_labels_color, dict_labels_names,'output/runs36/plots/' ,rand_number, dimension, orca=False)
 
+    def plot_corner():
+        p = 0.005
+        idx = np.random.choice(a=[True, False], size = len(labels_test), p=[p, 1-p]) #Indexes to plot (1% of the dataset for the PCA plots)
+        print("===Plotting Cornerplot===")
+        print(f"with {np.sum(idx)} datapoints")
+        labels = labels_test
+        corner_plot(embedded_test[idx], labels[idx], 'Corner plot of (3D-PCA) of the embedding with anomaly leptoquark', 
+                    'Corner plot of (3D-PCA) of the embedding with anomaly leptoquark.pdf',dict_labels_color, dict_labels_names, pca=True, normalize=True, background='one', anomalies=['leptoquark'], folder='output/runs29/plots/')
+        corner_plot(embedded_test[idx], labels[idx], 'Corner plot of (3D-PCA) of the embedding with anomaly ato4l', 
+                    'Corner plot of (3D-PCA) of the embedding with anomaly ato4l.pdf',dict_labels_color, dict_labels_names, pca=True, normalize=True, background='one', anomalies=['ato4l'], folder='output/runs29/plots/')
+        corner_plot(embedded_test[idx], labels[idx], 'Corner plot of (3D-PCA) of the embedding with anomaly hChToTauNu', 
+                    'Corner plot of (3D-PCA) of the embedding with anomaly hChToTauNu.pdf',dict_labels_color, dict_labels_names, pca=True, normalize=True, background='one', anomalies=['hChToTauNu'], folder='output/runs29/plots/')
+        corner_plot(embedded_test[idx], labels[idx], 'Corner plot of (3D-PCA) of the embedding with anomaly hToTauTau', 
+                    'Corner plot of (3D-PCA) of the embedding with anomaly hToTauTau.pdf',dict_labels_color, dict_labels_names, pca=True, normalize=True, background='one', anomalies=['hToTauTau'], folder='output/runs29/plots/')
+
+
     #plot_tsne()
     #plot_roc()
-    plot_pca(dimension=2)
+    #plot_pca(dimension=2)
+    plot_corner()
 
 if __name__ == '__main__':
     main()
