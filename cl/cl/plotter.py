@@ -96,7 +96,7 @@ def plot_ROC(predictions, labels, filename, title, folder='plots'):
     # Calculates ROC properties and plots on same plt
     false_pos_rate, true_pos_rate, threshold = roc_curve(true, predictions)
     area_under_curve = auc(false_pos_rate, true_pos_rate)
-    plt.plot(false_pos_rate, true_pos_rate, label=f'AUC: {area_under_curve*100:.1f}%', 
+    plt.plot(false_pos_rate, true_pos_rate, label=f'AUC: {area_under_curve*100:.2f}%', 
              linewidth=2, color='teal') 
     
     # Defines plot properties to highlight plot properties relevant to FPGA constraints
@@ -121,6 +121,66 @@ def plot_ROC(predictions, labels, filename, title, folder='plots'):
     plt.savefig(file_path) 
     plt.close('all')
     print(f"ROC Plot saved at '{filename}'")
+
+def plot_PCA(representations, labels, title, filename, dict_labels_color, dict_labels_names, folder='plots', rand_number=0, dimension=2, orca=False):
+    '''
+    Plots 2/3D PCA of representations and saves file at filename location depending on keyword dimension.
+    '''
+    # Perform PCA to extract the 2/3 prin. components
+    print(f"Plotting {dimension}D PCA!")
+    pca = PCA(n_components=dimension, random_state=rand_number)
+    components = pca.fit_transform(representations)
+
+    #Dictionary for randomly generated anomaly labels by orca
+    if orca:
+        dict_orca = {0: 0, 1: 1, 2: 2, 3: 3, 4: 7, 5: 5, 6: 6, 7: 4
+                }
+    else:
+        dict_orca = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7
+                }
+    
+    # Creates three dimensional plots 
+    fig = plt.figure()
+    if dimension==2:
+        ax = fig.add_subplot(111)
+    elif dimension==3:
+        ax  = fig.add_subplot(111, projection='3d')
+
+    #Create array for reordering the labels
+    containedlabels = []
+    for label in np.unique(labels):
+        #print(label)
+        containedlabels.append(int(label))
+        idx = np.where(label == labels)[0]
+        #print(np.shape(embedding_trans[idx,0]))
+        if dimension==2:
+            ax.scatter(components[idx,0], components[idx,1], c = dict_labels_color[dict_orca[label]], label = str(int(dict_orca[label]))+ ': ' + dict_labels_names[dict_orca[label]], s=1, zorder=(dict_orca[label]+1))
+        elif dimension==3:
+            ax.scatter(components[idx,0], components[idx,1], components[idx,2], c = dict_labels_color[dict_orca[label]], label = str(int(dict_orca[label]))+ ': ' + dict_labels_names[dict_orca[label]], s=1, zorder=(dict_orca[label]+1))
+    #reordering the labels 
+    handles, labels_legend = plt.gca().get_legend_handles_labels()
+    order = [dict_orca[i] for i in containedlabels]
+    order = np.array(order)
+    order = np.argsort(np.argsort(order))
+    ax.legend([handles[i] for i in order], [labels_legend[i] for i in order],loc='lower right', markerscale=3).set_zorder(10)
+    
+    # Labels axis and creates title 
+    ax.set_xlabel('Principal Component 1')
+    ax.set_ylabel('Principal Component 2')
+    if dimension==3:
+        ax.set_zlabel('Principal Component 3')
+    
+    ax.set_title(title)
+    
+    # Saves plot and reports success 
+    subfolder = os.path.dirname(__file__)
+    subfolder = os.path.join(subfolder, folder)
+    os.makedirs(subfolder, exist_ok=True)
+    file_path = os.path.join(subfolder, filename)
+    plt.savefig(file_path) 
+    plt.close('all')
+    print(f"PCA Plot saved at '{filename}'")
+     
 
 #Define inference if there is no embedding.npz already saved, in order to use for plots of the embedding
 def inference(model_name, input_data, input_labels, device=None):
@@ -196,29 +256,42 @@ def main():
     #embedded_test = embedding['embedding_test']
     labels_test = data['labels_test']
     data_test = data['x_test'].reshape(-1,57)
-    embedded_test = inference('output/runs35/vae.pth', data_test, labels_test)
+    embedded_test = inference('output/runs36/vae.pth', data_test, labels_test)
 
     #Plot t-SNE
     def plot_tsne():
         p = 0.01
-        idx = np.random.choice(a=[True, False], size = len(labels_test), p=[p, 1-p]) #Indexes to plot (10% of the dataset for the t-SNE plots)
+        idx = np.random.choice(a=[True, False], size = len(labels_test), p=[p, 1-p]) #Indexes to plot (1% of the dataset for the t-SNE plots)
         print("===Plotting t-SNE===")
         print(f"with {np.sum(idx)} datapoints")
-        tSNE(embedded_test[idx], labels_test[idx], '2D-t_SNE of 48D embedding with VICReg', '2D-t_SNE of 48D embedding with VICReg.pdf', drive_path+'output/runs35/plots/',
+        tSNE(embedded_test[idx], labels_test[idx], '2D-t_SNE of 48D embedding with VICReg', '2D-t_SNE of 48D embedding with SimCLR.pdf', drive_path+'output/runs36/plots/',
             dict_labels_color, dict_labels_names, rand_number, orca=False)
-        tSNE(data_test[idx], labels_test[idx], '2D-t_SNE of 57D test data', '2D-t_SNE of 57D test data.pdf', drive_path+'output/runs35/plots/',
+        tSNE(data_test[idx], labels_test[idx], '2D-t_SNE of 57D test data', '2D-t_SNE of 57D test data.pdf', drive_path+'output/runs36/plots/',
             dict_labels_color, dict_labels_names, rand_number, orca=False)
     
     #Plot ROC curve (with AUC)
     def plot_roc():
-        predictions = classification_score('output/runs29/vae.pth', 'output/runs29/head.pth', data_test, labels_test, mode='roc')
-        predictions = classification_score('NoEmbedding', 'output/NoEmbedding/head.pth', data_test, labels_test, mode='roc')
+        print("===Plotting ROC curve===")
+        predictions = classification_score('output/runs36/vae.pth', 'output/runs36/head.pth', data_test, labels_test, mode='roc')
+        predictions_noembedding = classification_score('NoEmbedding', 'output/NoEmbedding/head.pth', data_test, labels_test, mode='roc')
         labels = labels_test
-        plot_ROC(predictions, labels, title='ROC curve with AUC for SimCLR embedding with supervised linear evaluation', filename='ROC curve with AUC for SimCLR embedding with supervised linear evaluation.pdf', folder='output/runs29/plots/')
-        plot_ROC(predictions, labels, title='ROC curve with AUC for No Embedding with supervised linear evaluation', filename='ROC curve with AUC for No Embedding with supervised linear evaluation.pdf', folder='output/runs29/plots/')
+        plot_ROC(predictions, labels, title='ROC curve with AUC for SimCLR embedding with supervised linear evaluation', filename='ROC curve with AUC for SimCLR embedding with supervised linear evaluation.pdf', folder='output/runs36/plots/')
+        plot_ROC(predictions_noembedding, labels, title='ROC curve with AUC for No Embedding with supervised linear evaluation', filename='ROC curve with AUC for No Embedding with supervised linear evaluation.pdf', folder='output/runs36/plots/')
+    
+    def plot_pca(dimension=2):
+        p = 0.01
+        idx = np.random.choice(a=[True, False], size = len(labels_test), p=[p, 1-p]) #Indexes to plot (1% of the dataset for the PCA plots)
+        print("===Plotting PCA===")
+        print(f"with {np.sum(idx)} datapoints")
+        labels = labels_test
+        plot_PCA(embedded_test[idx], labels[idx], f'{dimension}D PCA of 48D embedding with SimCLR', f'{dimension}D PCA of 48D embedding with SimCLR.pdf',
+                 dict_labels_color, dict_labels_names,'output/runs36/plots/' ,rand_number, dimension, orca=False)
+        plot_PCA(data_test[idx], labels[idx], f'{dimension}D PCA of 57D test data', f'{dimension}D PCA of 57D test data.pdf',
+                 dict_labels_color, dict_labels_names,'output/runs36/plots/' ,rand_number, dimension, orca=False)
 
     #plot_tsne()
-    plot_roc()
+    #plot_roc()
+    plot_pca(dimension=2)
 
 if __name__ == '__main__':
     main()
