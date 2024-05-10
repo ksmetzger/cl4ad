@@ -58,7 +58,7 @@ def main():
     best_acc = argparse.Namespace(top1=0, top5=0)
 
     #Dataset with signals and original divisions=[0.592,0.338,0.067,0.003]
-    dataset = np.load(args.dataset)
+    x_train, x_test, x_val, labels_train, labels_test, labels_val = load_data(args.dataset)
 
     #Get pretrained model
     if args.arch == "SimpleDense":
@@ -91,30 +91,35 @@ def main():
 
     #For semi-supervised fine-tuning create {percent} of the original x_train
     if args.type == "finetune":
-        idx_percent = np.random.choice(dataset.labels_train.shape[0], size = int(args.percent/100*dataset.labels_train.shape[0]) ,replace=False) #Already seeded from dataset call
-        dataset.x_train = dataset.x_train[idx_percent]
-        dataset.labels_train = dataset.labels_train[idx_percent]
+        np.random.seed(0)
+        idx_percent = np.random.choice(labels_train.shape[0], size = int(args.percent/100*labels_train.shape[0]) ,replace=False) #Already seeded from dataset call
+        x_train = x_train[idx_percent]
+        labels_train = labels_train[idx_percent]
 
 
     #Dataloaders
     train_data_loader = DataLoader(
-        TorchCLDataset(dataset['x_train'], dataset['labels_train'], device),
+        TorchCLDataset(x_train, labels_train, device),
         batch_size=args.batch_size,
         shuffle=True)
     print("Length of the train Dataloader: ",len(train_data_loader))
     val_data_loader = DataLoader(
-        TorchCLDataset(dataset['x_val'], dataset['labels_val'], device),
+        TorchCLDataset(x_val, labels_val, device),
         batch_size=args.batch_size,
         shuffle=False)
     print("Length of the val Dataloader: ",len(val_data_loader))
     test_data_loader = DataLoader(
-        TorchCLDataset(dataset['x_test'], dataset['labels_test'], device),
+        TorchCLDataset(x_test, labels_test, device),
         batch_size=args.batch_size,
         shuffle=False)
     print("Length of the test Dataloader: ",len(val_data_loader))
     #Loss function set to the standard CrossEntropyLoss
     criterion = nn.CrossEntropyLoss().to(device=device)
-    optimizer = torch.optim.SGD(head.parameters(), lr=1e-3, weight_decay=args.weight_decay)
+    
+    param_groups = [dict(params=head.parameters())]
+    if args.type == "finetune":
+        param_groups.append(dict(params=backbone.parameters()))
+    optimizer = torch.optim.SGD(param_groups, lr=1e-3, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs)
 
     start_time = time.time()
@@ -185,7 +190,7 @@ def main():
         #Save the finetuned backbone + the classification head
         torch.save(head.state_dict(), args.head_name)
         torch.save(backbone.state_dict(), args.backbone_name + '_' +args.percent)
-        print(f"Classification + finetuned backbone (with {args.percent}% labeled data) successfully saved!")
+        print(f"Classification head + finetuned backbone (with {args.percent}% labeled data) successfully saved!")
     
     #Print the penultimate performance also on the test dataset to confirm the changes made based on the accuracies of the validation dataset
     top1, top5 = test_accuracy(test_data_loader, backbone, head)
@@ -255,6 +260,13 @@ class AverageMeter(object):
     def __str__(self):
         fmtstr = "{name} {val" + self.fmt + "} ({avg" + self.fmt + "})"
         return fmtstr.format(**self.__dict__)
+    
+def load_data(data_dir=''):
+    dataset = np.load(data_dir)
+    x_train, labels_train = dataset['x_train'], dataset['labels_train']
+    x_test, labels_test = dataset['x_test'], dataset['labels_test']
+    x_val, labels_val = dataset['x_val'], dataset['labels_val']
+    return x_train, x_test, x_val, labels_train, labels_test, labels_val
 
 if __name__ == "__main__":
     main()
