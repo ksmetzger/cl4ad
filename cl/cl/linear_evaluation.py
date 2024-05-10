@@ -189,7 +189,7 @@ def main():
     elif args.type == 'finetune':
         #Save the finetuned backbone + the classification head
         torch.save(head.state_dict(), args.head_name)
-        torch.save(backbone.state_dict(), args.backbone_name + '_' +args.percent)
+        torch.save(backbone.state_dict(), str(args.percent) + '_' + args.backbone_name)
         print(f"Classification head + finetuned backbone (with {args.percent}% labeled data) successfully saved!")
     
     #Print the penultimate performance also on the test dataset to confirm the changes made based on the accuracies of the validation dataset

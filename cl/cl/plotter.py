@@ -81,6 +81,7 @@ def tSNE(embedding, labels, title, filename, namedir, dict_labels_color, dict_la
     plt.title(title)
     plt.savefig(results_dir + filename ,dpi=300)
     plt.show(block=False)
+    plt.close("all")
 
 #From graphing_module.py
 def plot_ROC(predictions, labels, filename, title, folder='plots'): 
@@ -192,6 +193,7 @@ def corner_plot(embedding, labels, title, filename, dict_labels_color, dict_labe
     anomalies: array with all of the anomaly names for plotting (default: ['leptoquark', 'ato4l', 'hChToTauNu', 'hToTauTau']) 
     '''
     print("Plotting Corner Plots!")
+    print(f"Mean: {np.mean(embedding)} and std: {np.std(embedding)}")
     if pca==True:
         pca = PCA(n_components=3, random_state=rand_number) 
         embedding = pca.fit_transform(embedding)
@@ -318,7 +320,7 @@ def classification_score(backbone_name, head_name, input_data, input_labels, dev
     return predictions
 
 #Plot embedding (always the _test) with different methods
-def main():
+def main(runs):
     rand_number = 0
     np.random.seed(rand_number)
 
@@ -328,8 +330,8 @@ def main():
     #embedding = np.load(drive_path+'output/runs35/embedding.npz')
     #embedded_test = embedding['embedding_test']
     labels_test = data['labels_test']
-    data_test = data['x_test'].reshape(-1,57)
-    embedded_test = inference('output/runs29/vae.pth', data_test, labels_test)
+    data_test = data['x_test']
+    embedded_test = inference(f'output/{runs}/vae.pth', data_test, labels_test)
 
     #Plot t-SNE
     def plot_tsne():
@@ -337,19 +339,19 @@ def main():
         idx = np.random.choice(a=[True, False], size = len(labels_test), p=[p, 1-p]) #Indexes to plot (1% of the dataset for the t-SNE plots)
         print("===Plotting t-SNE===")
         print(f"with {np.sum(idx)} datapoints")
-        tSNE(embedded_test[idx], labels_test[idx], '2D-t_SNE of 48D embedding with VICReg', '2D-t_SNE of 48D embedding with SimCLR.pdf', drive_path+'output/runs36/plots/',
+        tSNE(embedded_test[idx], labels_test[idx], '2D-t_SNE of 48D embedding with SimCLR', '2D-t_SNE of 48D embedding with SimCLR.pdf', drive_path+f'output/{runs}/plots/',
             dict_labels_color, dict_labels_names, rand_number, orca=False)
-        tSNE(data_test[idx], labels_test[idx], '2D-t_SNE of 57D test data', '2D-t_SNE of 57D test data.pdf', drive_path+'output/runs36/plots/',
+        tSNE(data_test[idx], labels_test[idx], '2D-t_SNE of 57D test data', '2D-t_SNE of 57D test data.pdf', drive_path+f'output/{runs}/plots/',
             dict_labels_color, dict_labels_names, rand_number, orca=False)
     
     #Plot ROC curve (with AUC)
     def plot_roc():
         print("===Plotting ROC curve===")
-        predictions = classification_score('output/runs36/vae.pth', 'output/runs36/head.pth', data_test, labels_test, mode='roc')
+        predictions = classification_score(f'output/{runs}/vae.pth', f'output/{runs}/head.pth', data_test, labels_test, mode='roc')
         predictions_noembedding = classification_score('NoEmbedding', 'output/NoEmbedding/head.pth', data_test, labels_test, mode='roc')
         labels = labels_test
-        plot_ROC(predictions, labels, title='ROC curve with AUC for SimCLR embedding with supervised linear evaluation', filename='ROC curve with AUC for SimCLR embedding with supervised linear evaluation.pdf', folder='output/runs36/plots/')
-        plot_ROC(predictions_noembedding, labels, title='ROC curve with AUC for No Embedding with supervised linear evaluation', filename='ROC curve with AUC for No Embedding with supervised linear evaluation.pdf', folder='output/runs36/plots/')
+        plot_ROC(predictions, labels, title='ROC curve with AUC for SimCLR embedding with supervised linear evaluation', filename='ROC curve with AUC for SimCLR embedding with supervised linear evaluation.pdf', folder=f'output/{runs}/plots/')
+        plot_ROC(predictions_noembedding, labels, title='ROC curve with AUC for No Embedding with supervised linear evaluation', filename='ROC curve with AUC for No Embedding with supervised linear evaluation.pdf', folder=f'output/{runs}/plots/')
     
     def plot_pca(dimension=2):
         p = 0.01
@@ -358,9 +360,9 @@ def main():
         print(f"with {np.sum(idx)} datapoints")
         labels = labels_test
         plot_PCA(embedded_test[idx], labels[idx], f'{dimension}D PCA of 48D embedding with SimCLR', f'{dimension}D PCA of 48D embedding with SimCLR.pdf',
-                 dict_labels_color, dict_labels_names,'output/runs36/plots/' ,rand_number, dimension, orca=False)
+                 dict_labels_color, dict_labels_names,f'output/{runs}/plots/' ,rand_number, dimension, orca=False)
         plot_PCA(data_test[idx], labels[idx], f'{dimension}D PCA of 57D test data', f'{dimension}D PCA of 57D test data.pdf',
-                 dict_labels_color, dict_labels_names,'output/runs36/plots/' ,rand_number, dimension, orca=False)
+                 dict_labels_color, dict_labels_names,f'output/{runs}/plots/' ,rand_number, dimension, orca=False)
 
     def plot_corner():
         p = 0.005
@@ -369,19 +371,19 @@ def main():
         print(f"with {np.sum(idx)} datapoints")
         labels = labels_test
         corner_plot(embedded_test[idx], labels[idx], 'Corner plot of (3D-PCA) of the embedding with anomaly leptoquark', 
-                    'Corner plot of (3D-PCA) of the embedding with anomaly leptoquark.pdf',dict_labels_color, dict_labels_names, pca=True, normalize=True, background='one', anomalies=['leptoquark'], folder='output/runs29/plots/')
+                    'Corner plot of (3D-PCA) of the embedding with anomaly leptoquark.pdf',dict_labels_color, dict_labels_names, pca=True, normalize=True, background='one', anomalies=['leptoquark'], folder=f'output/{runs}/plots/')
         corner_plot(embedded_test[idx], labels[idx], 'Corner plot of (3D-PCA) of the embedding with anomaly ato4l', 
-                    'Corner plot of (3D-PCA) of the embedding with anomaly ato4l.pdf',dict_labels_color, dict_labels_names, pca=True, normalize=True, background='one', anomalies=['ato4l'], folder='output/runs29/plots/')
+                    'Corner plot of (3D-PCA) of the embedding with anomaly ato4l.pdf',dict_labels_color, dict_labels_names, pca=True, normalize=True, background='one', anomalies=['ato4l'], folder=f'output/{runs}/plots/')
         corner_plot(embedded_test[idx], labels[idx], 'Corner plot of (3D-PCA) of the embedding with anomaly hChToTauNu', 
-                    'Corner plot of (3D-PCA) of the embedding with anomaly hChToTauNu.pdf',dict_labels_color, dict_labels_names, pca=True, normalize=True, background='one', anomalies=['hChToTauNu'], folder='output/runs29/plots/')
+                    'Corner plot of (3D-PCA) of the embedding with anomaly hChToTauNu.pdf',dict_labels_color, dict_labels_names, pca=True, normalize=True, background='one', anomalies=['hChToTauNu'], folder=f'output/{runs}/plots/')
         corner_plot(embedded_test[idx], labels[idx], 'Corner plot of (3D-PCA) of the embedding with anomaly hToTauTau', 
-                    'Corner plot of (3D-PCA) of the embedding with anomaly hToTauTau.pdf',dict_labels_color, dict_labels_names, pca=True, normalize=True, background='one', anomalies=['hToTauTau'], folder='output/runs29/plots/')
+                    'Corner plot of (3D-PCA) of the embedding with anomaly hToTauTau.pdf',dict_labels_color, dict_labels_names, pca=True, normalize=True, background='one', anomalies=['hToTauTau'], folder=f'output/{runs}/plots/')
 
 
-    #plot_tsne()
-    #plot_roc()
-    #plot_pca(dimension=2)
+    plot_tsne()
+    plot_roc()
+    plot_pca(dimension=2)
     plot_corner()
 
 if __name__ == '__main__':
-    main()
+    main('runs39')

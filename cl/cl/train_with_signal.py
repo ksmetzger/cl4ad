@@ -45,7 +45,7 @@ def main(args):
     #criterion = losses.VICRegLoss()
     criterion = losses.SimCLRloss_nolabels_fast()
     #Standard schedule
-    """ optimizer = torch.optim.Adam(model.parameters(), lr=1e-2, weight_decay=1e-3) #Adams pytorch impl. of weight decay is equiv. to the L2 penalty.
+    """ optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-3) #Adams pytorch impl. of weight decay is equiv. to the L2 penalty.
     scheduler_1 = torch.optim.lr_scheduler.ConstantLR(optimizer, total_iters=5)
     scheduler_2 = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.95)
     scheduler_3 = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-5)
@@ -69,12 +69,12 @@ def main(args):
             # embed entire batch with first value of the batch repeated
             #first_val_repeated = val[0].repeat(args.batch_size, 1)
             #For DeepSets needs input shape (bsz, 19 , 3)
-            #embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
-            embedded_values_orig = model(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=0), device=device, rand_number=0))
+            embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
+            #embedded_values_orig = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0))
             #embedded_values_aug = model(first_val_repeated)
             #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
-            #embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
-            embedded_values_aug = model(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42))
+            embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
+            #embedded_values_aug = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42))
             feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
             #similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,96)), embedded_values_aug.reshape((-1,96)))
             similar_embedding_loss = criterion(feature)
@@ -104,12 +104,12 @@ def main(args):
 
                 #first_val_repeated = val[0].repeat(args.batch_size, 1)
 
-                #embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
+                embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
                 #embedded_values_aug = model(first_val_repeated)
-                embedded_values_orig = model(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=0), device=device, rand_number=0))
+                #embedded_values_orig = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0))
                 #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
-                #embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
-                embedded_values_aug = model(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42))
+                embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
+                #embedded_values_aug = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42))
                 feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
                 #similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,96)), embedded_values_aug.reshape((-1,96)))
                 similar_embedding_loss = criterion(feature)
@@ -124,22 +124,6 @@ def main(args):
         tb_writer.flush()
         return last_sim_loss
 
-    def adjust_learning_rate(args, warmup_epochs ,epoch, optimizer, base_lr):
-        max_epochs = args.epochs
-        base_lr = base_lr * args.batch_size / 256 #Scale like suggested by VICReg for base_lr = 0.2 (SimCLR has base_lr = 0.3)
-        if epoch <= warmup_epochs:
-            lr = base_lr * epoch / warmup_epochs #Linear warmup
-        else:
-            epoch -= warmup_epochs
-            max_epochs -= warmup_epochs
-            q = 0.5 * (1 + math.cos(math.pi * epoch / max_epochs))
-            end_lr = base_lr * 0.001
-            lr = base_lr * q + end_lr * (1-q)
-        for param_group in optimizer.param_groups:
-            param_group["lr"] = lr
-        return lr
-
-
     writer = SummaryWriter("output/results", comment="Similarity with LR=1e-3", flush_secs=5)
 
     if args.train:
@@ -151,7 +135,7 @@ def main(args):
         for epoch in range(1, args.epochs+1):
             print(f'EPOCH {epoch}')
             #Adjust the learning rate with Version 2 schedule (see OneNote)
-            lr = adjust_learning_rate(args, 10, epoch, optimizer, base_lr=0.025)
+            lr = adjust_learning_rate(args, 10, epoch, optimizer, base_lr=0.0125)
             print("current Learning rate: ", lr)
             writer.add_scalar('Learning_rate', lr, epoch)
             # Gradient tracking
@@ -259,6 +243,21 @@ class LARS(torch.optim.Optimizer): #Implementation from https://github.com/faceb
 def exclude_bias_and_norm(p):
     return p.ndim == 1
 
+def adjust_learning_rate(args, warmup_epochs ,epoch, optimizer, base_lr):
+        max_epochs = args.epochs
+        base_lr = base_lr * args.batch_size / 256 #Scale like suggested by VICReg for base_lr = 0.2 (SimCLR has base_lr = 0.3)
+        if epoch <= warmup_epochs:
+            lr = base_lr * epoch / warmup_epochs #Linear warmup
+        else:
+            epoch -= warmup_epochs
+            max_epochs -= warmup_epochs
+            q = 0.5 * (1 + math.cos(math.pi * epoch / max_epochs))
+            end_lr = base_lr * 0.001
+            lr = base_lr * q + end_lr * (1-q)
+        for param_group in optimizer.param_groups:
+            param_group["lr"] = lr
+        return lr
+
 class TorchCLDataset(Dataset):
   'Characterizes a dataset for PyTorch'
   def __init__(self, features, labels, device):
@@ -304,7 +303,7 @@ class EarlyStopping:
 
         if val_loss < self.min_val_loss - self.delta:
             if self.verbose:
-                print(f"Validation loss lowered from {self.min_val_loss} ---> to {val_loss} and the model was saved!")
+                print(f"Validation loss lowered from {self.min_val_loss:.4f} ---> to {val_loss:.4f} and the model was saved!")
             self.min_val_loss = val_loss
             self.counter = 0
             self.save_checkpoint(model)

@@ -75,7 +75,7 @@ def gaussian_resampling_pT(input_batch, device=None, rand_number=0, std_scale=0.
 
     return resampled_batch
 
-def naive_masking(input_batch, device=None, rand_number=0, p=0.4, mask_full_particle=False):
+def naive_masking(input_batch, device=None, rand_number=0, p=0.5, mask_full_particle=False):
     '''
     Applies the augmentation "naive_masking" to events in a batch (torch tensor) and outputs a torch tensor values randomly masked with probability p.
     Args:
