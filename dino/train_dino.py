@@ -11,7 +11,6 @@ from torch.utils.tensorboard import SummaryWriter
 from torchsummary import summary
 
 import dino_loss
-from dataset import TorchCLDataset, CLBackgroundDataset, CLSignalDataset, CLBackgroundSignalDataset
 from transformer import TransformerEncoder
 import augmentations
 import utils
@@ -25,31 +24,38 @@ def main(args):
     print(f'Using {device}')
 
     #Dataset with signals and original divisions=[0.592,0.338,0.067,0.003]
-    dataset = CLBackgroundSignalDataset(args.background_dataset, args.background_ids, args.anomaly_dataset,
-        preprocess=args.scaling_filename, n_events=args.sample_size,
-        divisions=[0.592,0.338,0.067,0.003],
-        device=device
-    )
-    dataset.report_specs()
+    dataset = np.load('C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\' + args.dataset)
 
     train_data_loader = DataLoader(
-        TorchCLDataset(dataset.x_train[0:5000], dataset.labels_train[0:5000], device),
+        TorchCLDataset(dataset['x_train'], dataset['labels_train'], device),
         batch_size=args.batch_size,
         shuffle=True, drop_last=True)
 
     test_data_loader = DataLoader(
-        TorchCLDataset(dataset.x_test, dataset.labels_test, device),
+        TorchCLDataset(dataset['x_test'], dataset['labels_test'], device),
         batch_size=args.batch_size,
         shuffle=False)
 
     val_data_loader = DataLoader(
-        TorchCLDataset(dataset.x_val[0:5000], dataset.labels_val[0:5000], device),
+        TorchCLDataset(dataset['x_val'], dataset['labels_val'], device),
         batch_size=args.batch_size,
         shuffle=False, drop_last=True)
+    
+    #Transformer + DINO head architecture args
+    transformer_args = dict(
+        input_dim=3, 
+        model_dim=64, 
+        output_dim=args.out_dim, 
+        n_heads=8, 
+        dim_feedforward=256, 
+        n_layers=4,
+        hidden_dim_dino_head=256,
+        bottleneck_dim_dino_head=64,
+    )
 
     #Build student and teacher models and move them to device
-    student = TransformerEncoder().to(device)
-    teacher = TransformerEncoder().to(device)
+    student = TransformerEncoder(**transformer_args).to(device)
+    teacher = TransformerEncoder(**transformer_args).to(device)
     summary(student, input_size=(19,3))
     # teacher and student start with the same weights
     teacher.load_state_dict(student.state_dict())
@@ -105,10 +111,10 @@ def main(args):
                     param_group["weight_decay"] = wd_schedule[it]
 
             # teacher and student forward passes + compute dino loss
-            embedded_values_orig_student = student(val.reshape(-1,19,3))
-            embedded_values_aug_student = student((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
-            embedded_values_orig_teacher = teacher(val.reshape(-1,19,3))
-            embedded_values_aug_teacher = teacher((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
+            embedded_values_orig_student = student(augmentations.naive_masking(val, device=device, rand_number=0, p=0.5, mask_full_particle=False).reshape(-1,19,3))
+            embedded_values_aug_student = student(augmentations.naive_masking(val, device=device, rand_number=42, p=0.5, mask_full_particle=False).reshape(-1,19,3))
+            embedded_values_orig_teacher = teacher(augmentations.naive_masking(val, device=device, rand_number=0, p=0.5, mask_full_particle=False).reshape(-1,19,3))
+            embedded_values_aug_teacher = teacher(augmentations.naive_masking(val, device=device, rand_number=42, p=0.5, mask_full_particle=False).reshape(-1,19,3))
             teacher_output = torch.cat([embedded_values_orig_teacher,embedded_values_aug_teacher],dim=0)
             student_output = torch.cat([embedded_values_orig_student,embedded_values_aug_student],dim=0)
             loss = criterion(student_output, teacher_output, epoch_index)
@@ -169,6 +175,7 @@ def main(args):
         train_losses = []
         val_losses = []
         start_time = time.time()
+        temp_time = start_time
         print("Starting DINO training !")
         for epoch in range(1, args.epochs+1):
             print(f'EPOCH {epoch}')
@@ -182,7 +189,9 @@ def main(args):
             avg_val_loss = val_one_epoch(epoch, writer)
             val_losses.append(avg_val_loss)
 
+            temp_time = time.time()-temp_time
             print(f"Train/Val DINO Loss after epoch: {avg_train_loss:.4f}/{avg_val_loss:.4f}")
+            print(f"taking {temp_time:.1f}s to complete")
 
         #Save both networks for now
         torch.save(student.state_dict(), str(args.model_name + "_student"))
@@ -200,32 +209,101 @@ def main(args):
         plt.savefig('output/loss.pdf')
         
     else:
-        student.load_state_dict(torch.load(args.model_name, map_location=torch.device(device)))
-        student.eval()
+        #Evaluate using the teacher weights (backbone) as suggested by first author
+        teacher.load_state_dict(torch.load(args.model_name+ "_teacher", map_location=torch.device(device)))
+        teacher.eval()
 
-    #Save the embedding output seperately for the background and signal part
-    #dataset.save(args.output_filename, model)
-    with torch.no_grad():
-        CLBackgroundDataset(args.background_dataset, args.background_ids, n_events=args.sample_size,
-            preprocess=args.scaling_filename,
-            divisions=[0.592,0.338,0.067,0.003],
-            device=device).save(args.output_filename, student)
-        CLSignalDataset(args.anomaly_dataset,n_events=args.sample_size, preprocess=args.scaling_filename, device=device).save(f'output/anomalies_embedding.npz', student)
+        #Save the embedding output for the background and signal part
+        embedding_dict = dict()
+        train_data_loader = DataLoader(
+        TorchCLDataset(dataset['x_train'], dataset['labels_train'], device),
+        batch_size=args.batch_size,
+        shuffle=False)
+        val_data_loader = DataLoader(
+        TorchCLDataset(dataset['x_val'], dataset['labels_val'], device),
+        batch_size=args.batch_size,
+        shuffle=False)
+        for loader, name in zip([train_data_loader, test_data_loader, val_data_loader],['train','test','val']):
+            with torch.no_grad():
+                embedding = np.concatenate([teacher.representation(data).cpu().detach().numpy() for (data, label) in loader], axis=0)
+                embedding_dict[f"embedding_{name}"] = embedding
 
+        np.savez(args.output_filename, **embedding_dict)
+        print(f"Successfully saved embedding under {args.output_filename}")
+
+class TorchCLDataset(Dataset):
+  'Characterizes a dataset for PyTorch'
+  def __init__(self, features, labels, device):
+        'Initialization'
+        self.device = device
+        self.features = torch.from_numpy(features).to(dtype=torch.float32, device=self.device)
+        self.labels = torch.from_numpy(labels).to(dtype=torch.float32, device=self.device)
+
+  def __len__(self):
+        'Denotes the total number of samples'
+        return len(self.features)
+
+  def __getitem__(self, index):
+        'Generates one sample of data'
+        # Load data and get label
+        X = self.features[index]
+        y = self.labels[index]
+
+        return X, y
+
+class EarlyStopping:
+    '''Defines an EarlyStopper which stops training when the validation loss does not decrease with certain patience'''
+    def __init__(self, patience=5, delta=0, path='default.pth', verbose=False):
+        '''
+        Args:
+            patience: How many epochs to wait for val_loss to improve again (default: 5)
+            delta: minimum change in the val_loss metric to qualify as an improvement (default: 0)
+            path: output path of the checkpointed model (default: 'default.pth')
+            verbose: print everytime the val_loss significantly lowers and the model is saved (default: False)
+        '''
+        self.patience = patience
+        self.delta = delta
+        self.path = path
+        self.verbose = verbose
+        
+        self.counter = 0
+        self.min_val_loss = float(np.Inf)
+        self.early_stop = False
+
+    def __call__(self, val_loss, model, epoch):
+        
+        assert(val_loss != np.nan)
+
+        if val_loss < self.min_val_loss - self.delta:
+            if self.verbose:
+                print(f"Validation loss lowered from {self.min_val_loss:.4f} ---> to {val_loss:.4f} and the model was saved!")
+            self.min_val_loss = val_loss
+            self.counter = 0
+            self.save_checkpoint(model)
+        elif val_loss > self.min_val_loss - self.delta:
+            self.counter += 1
+            print(f"Early Stopper count at {self.counter} out of {self.patience}")
+            if self.counter >= self.patience:
+                self.early_stop = True
+                print(f"Early Stopped at epoch {epoch}! And saved model from epoch {epoch-self.counter} with validation loss {self.min_val_loss}")
+        else:
+            assert(False)
+                
+    def save_checkpoint(self, model):
+        '''Saves the model if the val_loss is decreasing'''
+        torch.save(model.state_dict(), self.path)
 
 if __name__ == '__main__':
     # Parses terminal command
     parser = ArgumentParser()
 
     # If not using full data, name of smaller dataset to pull from
-    parser.add_argument('background_dataset', type=str)
-    parser.add_argument('background_ids', type=str)
-    parser.add_argument('anomaly_dataset', type=str)
+    parser.add_argument('dataset', type=str)
 
     parser.add_argument('--epochs', type=int, default=1)
     parser.add_argument('--batch-size', type=int, default=1024)
     parser.add_argument('--loss-temp', type=float, default=0.07)
-    parser.add_argument('--model-name', type=str, default='output/vae.pth')
+    parser.add_argument('--model-name', type=str, default='output/dino_transformer.pth')
     parser.add_argument('--scaling-filename', type=str)
     parser.add_argument('--output-filename', type=str, default='output/embedding.npz')
     parser.add_argument('--sample-size', type=int, default=-1)
@@ -242,7 +320,7 @@ if __name__ == '__main__':
         starting with the default value of 0.04 and increase this slightly if needed.""")
     parser.add_argument('--warmup_teacher_temp_epochs', default=0, type=int,
         help='Number of warmup epochs for the teacher temperature (Default: 30).')
-    parser.add_argument('--out_dim', default=512, type=int, help="""Dimensionality of
+    parser.add_argument('--out_dim', default=64, type=int, help="""Dimensionality of
         the DINO head output. For complex and large datasets large values (like 65k) work well.""")
     parser.add_argument('--local_crops_number', type=int, default=0, help="""Number of small
         local views to generate. Set this parameter to 0 to disable multi-crop training.
