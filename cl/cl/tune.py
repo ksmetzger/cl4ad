@@ -25,15 +25,18 @@ from linear_evaluation import accuracy, test_accuracy, AverageMeter
 
 #Config with hyper params which should be tuned
 config = {
-    "base_lr": tune.loguniform(1e-2, 0.5),
-    "batch_size": tune.choice([512, 1024])
+    #"base_lr": tune.loguniform(1e-2, 1),
+    "base_lr": tune.choice([0.2]),
+    "batch_size": tune.choice([1024]),
+    "naive_mask_p": tune.choice([(i+1)/10 for i in range(10)]),
+    "mask_particle": tune.choice([True, False]),
 }
 
 def train_tune_params(config, data_dir):
     #Namespace with training/model params
     args = SimpleNamespace(
     #Training params
-    epochs = 50,
+    epochs = 30,
     epochs_eval = 3,
     weight_decay_eval = 1e-3,
     batch_size = config["batch_size"],
@@ -41,7 +44,11 @@ def train_tune_params(config, data_dir):
     #Model params
     num_classes = 8,
     embed_dim = 48,
+    #Augmentations
+    naive_mask_p = config["naive_mask_p"],
+    mask_particle = config["mask_particle"],
 )
+    
     train_tune(args, data_dir)
 
 def load_data(data_dir=''):
@@ -102,7 +109,7 @@ def train_tune(args, data_dir=None):
         batch_size=args.batch_size,
         shuffle=False)
 
-    def train_one_epoch(epoch_index):
+    def train_one_epoch(args, epoch_index):
         running_sim_loss = 0.
         last_sim_loss = 0.
 
@@ -115,11 +122,11 @@ def train_tune(args, data_dir=None):
             # embed entire batch with first value of the batch repeated
             #first_val_repeated = val[0].repeat(args.batch_size, 1)
             #For DeepSets needs input shape (bsz, 19 , 3)
-            embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
+            embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0, p=args.naive_mask_p, mask_full_particle=args.mask_particle))
             #embedded_values_orig = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0))
             #embedded_values_aug = model(first_val_repeated)
             #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
-            embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
+            embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42, p=args.naive_mask_p, mask_full_particle=args.mask_particle))
             #embedded_values_aug = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42))
             feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
             #similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,96)), embedded_values_aug.reshape((-1,96)))
@@ -134,7 +141,7 @@ def train_tune(args, data_dir=None):
                 last_sim_loss = running_sim_loss / 500
                 running_sim_loss = 0.
         return last_sim_loss
-    def val_one_epoch(epoch_index):
+    def val_one_epoch(args, epoch_index):
         running_sim_loss = 0.
         last_sim_loss = 0.
 
@@ -146,11 +153,11 @@ def train_tune(args, data_dir=None):
 
                 #first_val_repeated = val[0].repeat(args.batch_size, 1)
 
-                embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
+                embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0, p=args.naive_mask_p, mask_full_particle=args.mask_particle))
                 #embedded_values_aug = model(first_val_repeated)
                 #embedded_values_orig = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0))
                 #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
-                embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
+                embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42, p=args.naive_mask_p, mask_full_particle=args.mask_particle))
                 #embedded_values_aug = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42))
                 feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
                 #similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,96)), embedded_values_aug.reshape((-1,96)))
@@ -170,12 +177,12 @@ def train_tune(args, data_dir=None):
         print(f"current Learning rate: {lr:.4f}")
         # Gradient tracking
         model.train(True)
-        avg_train_loss = train_one_epoch(epoch)
+        avg_train_loss = train_one_epoch(args, epoch)
         train_losses.append(avg_train_loss)
 
         # no gradient tracking, for validation
         model.train(False)
-        avg_val_loss = val_one_epoch(epoch)
+        avg_val_loss = val_one_epoch(args, epoch)
         val_losses.append(avg_val_loss)
 
         print(f"Train/Val Sim Loss after epoch: {avg_train_loss:.4f}/{avg_val_loss:.4f}")
@@ -243,7 +250,7 @@ def main(config, num_samples=20, cpus_per_trial=4, gpus_per_trial=1, device='cpu
     scheduler = ASHAScheduler(
         metric="accuracy",
         mode="max",
-        max_t=50,
+        max_t=30,
         grace_period=10,
         reduction_factor=2,
     )
@@ -269,7 +276,7 @@ def main(config, num_samples=20, cpus_per_trial=4, gpus_per_trial=1, device='cpu
         with open(data_path, "rb") as fp:
             best_checkpoint_data = pickle.load(fp)
 
-        best_trained_model.load_state_dict(best_checkpoint_data["net_state_dict"])
+        best_trained_model.load_state_dict(best_checkpoint_data["model_state_dict"])
         torch.save(best_trained_model.state_dict(), 'best_model_state_dict.pth')
 
 
@@ -283,5 +290,5 @@ if __name__ == "__main__":
         gpus_per_trial = 1
         cpus_per_trial = 4
 
-    main(config, num_samples=2, cpus_per_trial=cpus_per_trial ,gpus_per_trial=gpus_per_trial, device=device)
+    main(config, num_samples=10, cpus_per_trial=cpus_per_trial ,gpus_per_trial=gpus_per_trial, device=device)
 

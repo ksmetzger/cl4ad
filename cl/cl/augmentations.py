@@ -90,7 +90,7 @@ def naive_masking(input_batch, device=None, rand_number=0, p=0.5, mask_full_part
     input_numpy = input_batch.cpu().detach().numpy().reshape(-1)
     #Randomly (with prob. p) set parts of the input to 0.0 (mask/crop)
     if mask_full_particle:
-        mask = np.random.choice([True, False], size=input_numpy.shape[0]/3, replace=True, p=[p, 1-p]).reshape(-1,19)
+        mask = np.random.choice([True, False], size=int(input_numpy.shape[0]/3), replace=True, p=[p, 1-p]).reshape(-1,19)
         input_numpy.reshape(-1,19,3)[mask] = 0.0
     else:
         mask = np.random.choice([True, False], size=input_numpy.shape[0], replace=True, p=[p, 1-p])
