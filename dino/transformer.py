@@ -6,7 +6,7 @@ import torch.nn.functional as F
 #Implement transformer (only encoder w/o positional encoding) from "Attention is all you need": https://arxiv.org/pdf/1706.03762.pdf
 #using the implemenation from pytorch, similar to "JetCLR": https://github.com/bmdillon/JetCLR/blob/main/scripts/modules/transformer.py
 class TransformerEncoder(nn.Module):
-    def __init__(self,input_dim=3, model_dim=512, output_dim=512, n_heads=8, dim_feedforward=2048, n_layers=6, hidden_dim_dino_head=2048, bottleneck_dim_dino_head=256, head_norm=False, dropout=0.1):
+    def __init__(self,input_dim=3, model_dim=512, output_dim=512, n_heads=8, dim_feedforward=2048, n_layers=6, hidden_dim_dino_head=2048, bottleneck_dim_dino_head=256, head_norm=False, dropout=0.1, norm_last_layer=True):
         super(TransformerEncoder, self).__init__()
         self.input_dim = input_dim
         self.model_dim = model_dim
@@ -18,11 +18,12 @@ class TransformerEncoder(nn.Module):
         self.dropout = dropout
         self.hidden_dim_dino_head = hidden_dim_dino_head
         self.bottleneck_dim_dino_head =bottleneck_dim_dino_head
+        self.norm_last_layer = norm_last_layer
         #encoder part from pytorch
         self.embedding = nn.Linear(input_dim, model_dim)
         #Get a pre-norm tranformer encoder from pytorch
         self.transformer = nn.TransformerEncoder(nn.TransformerEncoderLayer(model_dim, n_heads, dim_feedforward=dim_feedforward, dropout=dropout, norm_first=True), n_layers)
-        self.dino_head = DINOHead(in_dim=self.model_dim, out_dim=self.output_dim, hidden_dim=self.hidden_dim_dino_head, bottleneck_dim=self.bottleneck_dim_dino_head)
+        self.dino_head = DINOHead(in_dim=self.model_dim, out_dim=self.output_dim, hidden_dim=self.hidden_dim_dino_head, bottleneck_dim=self.bottleneck_dim_dino_head, norm_last_layer=self.norm_last_layer)
         #Define [CLS] token for aggregate result where head attaches
         self.cls_token = nn.Parameter(torch.zeros(1, 1, model_dim))
     
@@ -85,3 +86,12 @@ class DINOHead(nn.Module):
         x = nn.functional.normalize(x, dim=-1, p=2)
         x = self.last_layer(x)
         return x
+    
+class Identity(torch.nn.Module):
+    def __init__(self):
+        super(Identity, self).__init__()
+        self.identity = nn.Identity()
+    def representation(self, x):
+        return self.identity(x)
+    def forward(self, x):
+        return self.representation(x)

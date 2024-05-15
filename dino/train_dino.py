@@ -3,6 +3,7 @@ from argparse import ArgumentParser
 import matplotlib.pyplot as plt
 import time
 import datetime
+import os
 
 import torch
 import torch.nn as nn
@@ -24,7 +25,7 @@ def main(args):
     print(f'Using {device}')
 
     #Dataset with signals and original divisions=[0.592,0.338,0.067,0.003]
-    dataset = np.load('C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\' + args.dataset)
+    dataset = np.load(os.path.join(os.getcwd(), args.dataset))
 
     train_data_loader = DataLoader(
         TorchCLDataset(dataset['x_train'], dataset['labels_train'], device),
@@ -54,7 +55,7 @@ def main(args):
     )
 
     #Build student and teacher models and move them to device
-    student = TransformerEncoder(**transformer_args).to(device)
+    student = TransformerEncoder(**transformer_args, norm_last_layer=args.norm_last_layer).to(device)
     teacher = TransformerEncoder(**transformer_args).to(device)
     summary(student, input_size=(19,3))
     # teacher and student start with the same weights
@@ -122,6 +123,9 @@ def main(args):
             #Update the student network
             optimizer.zero_grad()
             param_norms = None
+            if args.clip_grad:
+                param_norms = utils.clip_gradients(student, args.clip_grad)
+            utils.cancel_gradients_last_layer(epoch, student, args.freeze_last_layer)
             loss.backward()
             optimizer.step()
 
@@ -151,10 +155,10 @@ def main(args):
                 continue
 
             # teacher and student forward passes + compute dino loss
-            embedded_values_orig_student = student(val.reshape(-1,19,3))
-            embedded_values_aug_student = student((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
-            embedded_values_orig_teacher = teacher(val.reshape(-1,19,3))
-            embedded_values_aug_teacher = teacher((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
+            embedded_values_orig_student = student(augmentations.naive_masking(val, device=device, rand_number=0, p=0.5, mask_full_particle=False).reshape(-1,19,3))
+            embedded_values_aug_student = student(augmentations.naive_masking(val, device=device, rand_number=42, p=0.5, mask_full_particle=False).reshape(-1,19,3))
+            embedded_values_orig_teacher = teacher(augmentations.naive_masking(val, device=device, rand_number=0, p=0.5, mask_full_particle=False).reshape(-1,19,3))
+            embedded_values_aug_teacher = teacher(augmentations.naive_masking(val, device=device, rand_number=42, p=0.5, mask_full_particle=False).reshape(-1,19,3))
             teacher_output = torch.cat([embedded_values_orig_teacher,embedded_values_aug_teacher],dim=0)
             student_output = torch.cat([embedded_values_orig_student,embedded_values_aug_student],dim=0)
             loss = criterion(student_output, teacher_output, epoch_index)
@@ -169,16 +173,18 @@ def main(args):
         tb_writer.flush()
         return last_sim_loss
 
-    writer = SummaryWriter("output/results", comment="Similarity with standard DINOv1 settings", flush_secs=5)
+    writer = SummaryWriter(os.path.join(os.getcwd(), "output/results"), comment="Similarity with standard DINOv1 settings", flush_secs=5)
 
     if args.train:
         train_losses = []
         val_losses = []
         start_time = time.time()
-        temp_time = start_time
+        #Initialize the Early Stopper
+        EarlyStopper = EarlyStopping(patience=5, delta=0, path=args.model_name, verbose=True)
         print("Starting DINO training !")
         for epoch in range(1, args.epochs+1):
             print(f'EPOCH {epoch}')
+            temp_time = time.time()
             # Gradient tracking
             student.train(True), teacher.train(True)
             avg_train_loss = train_one_epoch(epoch, writer)
@@ -193,9 +199,14 @@ def main(args):
             print(f"Train/Val DINO Loss after epoch: {avg_train_loss:.4f}/{avg_val_loss:.4f}")
             print(f"taking {temp_time:.1f}s to complete")
 
+            #Check whether to EarlyStop
+            EarlyStopper(avg_val_loss, [teacher, student], epoch)
+            if EarlyStopper.early_stop:
+                break
+
         #Save both networks for now
-        torch.save(student.state_dict(), str(args.model_name + "_student"))
-        torch.save(teacher.state_dict(), str(args.model_name + "_teacher"))
+        #torch.save(student.state_dict(), os.path.join(os.getcwd(), "_student_" + args.model_name))
+        #torch.save(teacher.state_dict(), os.path.join(os.getcwd(), "_teacher_" + args.model_name))
         #Add timing and print it
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
@@ -206,11 +217,11 @@ def main(args):
         plt.xlabel('iterations')
         plt.ylabel('Loss')
         plt.legend()
-        plt.savefig('output/loss.pdf')
+        plt.savefig(os.path.join(os.getcwd(), 'output/loss.pdf'))
         
     else:
         #Evaluate using the teacher weights (backbone) as suggested by first author
-        teacher.load_state_dict(torch.load(args.model_name+ "_teacher", map_location=torch.device(device)))
+        teacher.load_state_dict(torch.load(os.path.join(os.getcwd(), "_teacher_" + args.model_name), map_location=torch.device(device)))
         teacher.eval()
 
         #Save the embedding output for the background and signal part
@@ -291,7 +302,9 @@ class EarlyStopping:
                 
     def save_checkpoint(self, model):
         '''Saves the model if the val_loss is decreasing'''
-        torch.save(model.state_dict(), self.path)
+        names = ["teacher", "student"]
+        for name, mod in zip(names, model):
+            torch.save(mod.state_dict(), os.path.join(os.getcwd(), f"_{name}_{self.path}"))
 
 if __name__ == '__main__':
     # Parses terminal command
@@ -301,9 +314,9 @@ if __name__ == '__main__':
     parser.add_argument('dataset', type=str)
 
     parser.add_argument('--epochs', type=int, default=1)
-    parser.add_argument('--batch-size', type=int, default=1024)
+    parser.add_argument('--batch-size', type=int, default=256)
     parser.add_argument('--loss-temp', type=float, default=0.07)
-    parser.add_argument('--model-name', type=str, default='output/dino_transformer.pth')
+    parser.add_argument('--model-name', type=str, default='dino_transformer.pth')
     parser.add_argument('--scaling-filename', type=str)
     parser.add_argument('--output-filename', type=str, default='output/embedding.npz')
     parser.add_argument('--sample-size', type=int, default=-1)
@@ -325,18 +338,28 @@ if __name__ == '__main__':
     parser.add_argument('--local_crops_number', type=int, default=0, help="""Number of small
         local views to generate. Set this parameter to 0 to disable multi-crop training.
         When disabling multi-crop we recommend to use "--global_crops_scale 0.14 1." """)
-    parser.add_argument('--weight_decay', type=float, default=0.04, help="""Initial value of the
+    parser.add_argument('--weight_decay', type=float, default=0.004, help="""Initial value of the
         weight decay. With ViT, a smaller value at the beginning of training works well.""")
-    parser.add_argument('--weight_decay_end', type=float, default=0.4, help="""Final value of the
+    parser.add_argument('--weight_decay_end', type=float, default=0.04, help="""Final value of the
         weight decay. We use a cosine schedule for WD and using a larger decay by
         the end of training improves performance for ViTs.""")
-    parser.add_argument("--lr", default=0.0005, type=float, help="""Learning rate at the end of
+    parser.add_argument("--lr", default=0.00005, type=float, help="""Learning rate at the end of
         linear warmup (highest LR used during training). The learning rate is linearly scaled
         with the batch size, and specified here for a reference batch size of 256.""")
-    parser.add_argument("--warmup_epochs", default=10, type=int,
+    parser.add_argument("--warmup_epochs", default=5, type=int,
         help="Number of epochs for the linear learning-rate warm up.")
-    parser.add_argument('--min_lr', type=float, default=1e-6, help="""Target LR at the
+    parser.add_argument('--min_lr', type=float, default=1e-7, help="""Target LR at the
         end of optimization. We use a cosine LR schedule with linear warmup.""")
+    parser.add_argument('--freeze_last_layer', default=1, type=int, help="""Number of epochs
+        during which we keep the output layer fixed. Typically doing so during
+        the first epoch helps training. Try increasing this value if the loss does not decrease.""")
+    parser.add_argument('--clip_grad', type=float, default=3.0, help="""Maximal parameter
+        gradient norm if using gradient clipping. Clipping with norm .3 ~ 1.0 can
+        help optimization for larger ViT architectures. 0 for disabling.""")
+    parser.add_argument('--norm_last_layer', default=True, type=utils.bool_flag,
+        help="""Whether or not to weight normalize the last layer of the DINO head.
+        Not normalizing leads to better performance but can make the training unstable.
+        In our experiments, we typically set this paramater to False with vit_small and True with vit_base.""")
     
     args = parser.parse_args()
     main(args)

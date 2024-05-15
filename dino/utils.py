@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from torch import nn
 import torch.distributed as dist
+import argparse
 
 def get_params_groups(model):
     regularized = []
@@ -29,3 +30,33 @@ def cosine_scheduler(base_value, final_value, epochs, niter_per_ep, warmup_epoch
     assert len(schedule) == epochs * niter_per_ep
     return schedule
 
+def clip_gradients(model, clip):
+    norms = []
+    for name, p in model.named_parameters():
+        if p.grad is not None:
+            param_norm = p.grad.data.norm(2)
+            norms.append(param_norm.item())
+            clip_coef = clip / (param_norm + 1e-6)
+            if clip_coef < 1:
+                p.grad.data.mul_(clip_coef)
+    return norms
+
+def cancel_gradients_last_layer(epoch, model, freeze_last_layer):
+    if epoch >= freeze_last_layer:
+        return
+    for n, p in model.named_parameters():
+        if "last_layer" in n:
+            p.grad = None
+
+def bool_flag(s):
+    """
+    Parse boolean arguments from the command line.
+    """
+    FALSY_STRINGS = {"off", "false", "0"}
+    TRUTHY_STRINGS = {"on", "true", "1"}
+    if s.lower() in FALSY_STRINGS:
+        return False
+    elif s.lower() in TRUTHY_STRINGS:
+        return True
+    else:
+        raise argparse.ArgumentTypeError("invalid value for a boolean flag")

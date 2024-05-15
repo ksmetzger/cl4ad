@@ -61,8 +61,11 @@ class SimCLRLoss(nn.Module):
 
 
 class VICRegLoss(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, inv_weight, var_weight, cov_weight):
         super().__init__()
+        self.inv_weight = inv_weight
+        self.var_weight = var_weight
+        self.cov_weight = cov_weight
 
     def forward(self, x, y):
         repr_loss = F.mse_loss(x, y)
@@ -87,9 +90,9 @@ class VICRegLoss(torch.nn.Module):
         cov_loss = self.off_diagonal(cov_x).pow_(2).sum().div(D)
         cov_loss += self.off_diagonal(cov_y).pow_(2).sum().div(D)
 
-        weighted_inv = repr_loss * 25. # * self.hparams.invariance_loss_weight
-        weighted_var = std_loss * 25. # self.hparams.variance_loss_weight
-        weighted_cov = cov_loss * 25. #self.hparams.covariance_loss_weight
+        weighted_inv = repr_loss * self.inv_weight # * self.hparams.invariance_loss_weight
+        weighted_var = std_loss * self.var_weight # self.hparams.variance_loss_weight
+        weighted_cov = cov_loss * self.cov_weight #self.hparams.covariance_loss_weight
 
         loss = weighted_inv + weighted_var + weighted_cov
 

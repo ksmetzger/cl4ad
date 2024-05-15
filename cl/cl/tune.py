@@ -26,10 +26,15 @@ from linear_evaluation import accuracy, test_accuracy, AverageMeter
 #Config with hyper params which should be tuned
 config = {
     #"base_lr": tune.loguniform(1e-2, 1),
-    "base_lr": tune.choice([0.2]),
+    "base_lr": tune.choice([0.025]),
     "batch_size": tune.choice([1024]),
-    "naive_mask_p": tune.choice([(i+1)/10 for i in range(10)]),
-    "mask_particle": tune.choice([True, False]),
+    #"naive_mask_p": tune.choice([(i+1)/10 for i in range(10)]),
+    #"mask_particle": tune.choice([True, False]),
+    "naive_mask_p": tune.choice([0.4]),
+    "mask_particle": tune.choice([True]),
+    "inv_weight": tune.grid_search([1,10,25]),
+    "var_weight": tune.grid_search([1,10,25]),
+    "cov_weight": tune.grid_search([1,10,25]),
 }
 
 def train_tune_params(config, data_dir):
@@ -37,13 +42,17 @@ def train_tune_params(config, data_dir):
     args = SimpleNamespace(
     #Training params
     epochs = 30,
-    epochs_eval = 3,
-    weight_decay_eval = 1e-3,
+    epochs_eval = 2,
+    weight_decay_eval = 1e-6,
     batch_size = config["batch_size"],
     base_lr = config["base_lr"],
     #Model params
     num_classes = 8,
     embed_dim = 48,
+    #Loss params
+    inv_weight = config["inv_weight"],
+    var_weight = config["var_weight"],
+    cov_weight = config["cov_weight"],
     #Augmentations
     naive_mask_p = config["naive_mask_p"],
     mask_particle = config["mask_particle"],
@@ -74,7 +83,8 @@ def train_tune(args, data_dir=None):
     backbone.to(device)
     head.to(device)
 
-    criterion = losses.SimCLRloss_nolabels_fast()
+    #criterion = losses.SimCLRloss_nolabels_fast()
+    criterion = losses.VICRegLoss(var_weight=args.var_weight, inv_weight=args.inv_weight, cov_weight=args.cov_weight)
     optimizer = LARS(model.parameters(), lr=0, weight_decay=1e-6, weight_decay_filter=exclude_bias_and_norm, lars_adaptation_filter=exclude_bias_and_norm)
     criterion_eval = nn.CrossEntropyLoss().to(device=device)
     optimizer_eval = torch.optim.SGD(head.parameters(), lr=1e-3, weight_decay=args.weight_decay_eval)
@@ -128,9 +138,9 @@ def train_tune(args, data_dir=None):
             #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
             embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42, p=args.naive_mask_p, mask_full_particle=args.mask_particle))
             #embedded_values_aug = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42))
-            feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
-            #similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,96)), embedded_values_aug.reshape((-1,96)))
-            similar_embedding_loss = criterion(feature)
+            #feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
+            similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,96)), embedded_values_aug.reshape((-1,96)))
+            #similar_embedding_loss = criterion(feature)
 
             optimizer.zero_grad()
             similar_embedding_loss.backward()
@@ -159,9 +169,9 @@ def train_tune(args, data_dir=None):
                 #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
                 embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42, p=args.naive_mask_p, mask_full_particle=args.mask_particle))
                 #embedded_values_aug = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42))
-                feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
-                #similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,96)), embedded_values_aug.reshape((-1,96)))
-                similar_embedding_loss = criterion(feature)
+                #feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
+                similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,96)), embedded_values_aug.reshape((-1,96)))
+                #similar_embedding_loss = criterion(feature)
 
                 running_sim_loss += similar_embedding_loss.item()
                 if idx % 50 == 0:
@@ -250,8 +260,8 @@ def main(config, num_samples=20, cpus_per_trial=4, gpus_per_trial=1, device='cpu
     scheduler = ASHAScheduler(
         metric="accuracy",
         mode="max",
-        max_t=30,
-        grace_period=10,
+        max_t=10,
+        grace_period=5,
         reduction_factor=2,
     )
     result = tune.run(
@@ -290,5 +300,5 @@ if __name__ == "__main__":
         gpus_per_trial = 1
         cpus_per_trial = 4
 
-    main(config, num_samples=10, cpus_per_trial=cpus_per_trial ,gpus_per_trial=gpus_per_trial, device=device)
+    main(config, num_samples=1, cpus_per_trial=cpus_per_trial ,gpus_per_trial=gpus_per_trial, device=device)
 
