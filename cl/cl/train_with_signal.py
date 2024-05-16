@@ -307,7 +307,7 @@ class EarlyStopping:
             self.min_val_loss = val_loss
             self.counter = 0
             self.save_checkpoint(model)
-        elif val_loss > self.min_val_loss - self.delta:
+        elif val_loss >= self.min_val_loss - self.delta:
             self.counter += 1
             print(f"Early Stopper count at {self.counter} out of {self.patience}")
             if self.counter >= self.patience:

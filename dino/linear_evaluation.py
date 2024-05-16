@@ -62,7 +62,7 @@ def main():
     #Get pretrained model
     if args.arch == "TransformerEncoder":
         #Transformer + DINO head architecture args
-        transformer_args = dict(
+        transformer_args_standard = dict(
             input_dim=3, 
             model_dim=64, 
             output_dim=64, 
@@ -71,9 +71,22 @@ def main():
             n_layers=4,
             hidden_dim_dino_head=256,
             bottleneck_dim_dino_head=64,
+            pos_encoding=False
         )
-        embed_dim = 64
-        backbone = TransformerEncoder(**transformer_args)
+        transformer_args_small = dict(
+        input_dim=3, 
+        model_dim=6, 
+        output_dim=64, 
+        n_heads=3, 
+        dim_feedforward=64, 
+        n_layers=4,
+        hidden_dim_dino_head=64,
+        bottleneck_dim_dino_head=32,
+        pos_encoding=False,
+    )
+        #embed_dim = 64
+        embed_dim=6
+        backbone = TransformerEncoder(**transformer_args_small)
     elif args.arch == "NoEmbedding":
         embed_dim = 57
         backbone = Identity()

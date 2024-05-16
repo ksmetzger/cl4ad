@@ -43,7 +43,7 @@ def main(args):
         shuffle=False, drop_last=True)
     
     #Transformer + DINO head architecture args
-    transformer_args = dict(
+    transformer_args_standard = dict(
         input_dim=3, 
         model_dim=64, 
         output_dim=args.out_dim, 
@@ -52,11 +52,25 @@ def main(args):
         n_layers=4,
         hidden_dim_dino_head=256,
         bottleneck_dim_dino_head=64,
+        pos_encoding = True,
+        use_mask = False,
+    )
+    transformer_args_small = dict(
+        input_dim=3, 
+        model_dim=6, 
+        output_dim=args.out_dim, 
+        n_heads=3, 
+        dim_feedforward=64, 
+        n_layers=4,
+        hidden_dim_dino_head=64,
+        bottleneck_dim_dino_head=32,
+        pos_encoding=False,
+        use_mask = False,
     )
 
     #Build student and teacher models and move them to device
-    student = TransformerEncoder(**transformer_args, norm_last_layer=args.norm_last_layer).to(device)
-    teacher = TransformerEncoder(**transformer_args).to(device)
+    student = TransformerEncoder(**transformer_args_standard, norm_last_layer=args.norm_last_layer).to(device)
+    teacher = TransformerEncoder(**transformer_args_standard).to(device)
     summary(student, input_size=(19,3))
     # teacher and student start with the same weights
     teacher.load_state_dict(student.state_dict())
@@ -98,7 +112,7 @@ def main(args):
         running_sim_loss = 0.
         last_sim_loss = 0.
 
-        for it, val in enumerate(train_data_loader, 1):
+        for it, val in enumerate(train_data_loader):
             val = val[0]
             # only applicable to the final batch
             if val.shape[0] != args.batch_size:
@@ -118,7 +132,7 @@ def main(args):
             embedded_values_aug_teacher = teacher(augmentations.naive_masking(val, device=device, rand_number=42, p=0.5, mask_full_particle=False).reshape(-1,19,3))
             teacher_output = torch.cat([embedded_values_orig_teacher,embedded_values_aug_teacher],dim=0)
             student_output = torch.cat([embedded_values_orig_student,embedded_values_aug_student],dim=0)
-            loss = criterion(student_output, teacher_output, epoch_index)
+            loss = criterion(student_output, teacher_output, epoch_index-1)
 
             #Update the student network
             optimizer.zero_grad()
@@ -137,9 +151,9 @@ def main(args):
 
             # Gather data and report
             running_sim_loss += loss.item()
-            if it % 500 == 0:
+            if (it+1) % 500 == 0:
                 last_sim_loss = running_sim_loss / 500
-                tb_x = epoch_index * len(train_data_loader) + it
+                tb_x = it
                 tb_writer.add_scalar('DINOLoss/train', last_sim_loss, tb_x)
                 running_sim_loss = 0.
         return last_sim_loss
@@ -149,7 +163,7 @@ def main(args):
         running_sim_loss = 0.
         last_sim_loss = 0.
 
-        for it, val in enumerate(val_data_loader, 1):
+        for it, val in enumerate(val_data_loader):
             val = val[0]
             if val.shape[0] != args.batch_size:
                 continue
@@ -164,9 +178,9 @@ def main(args):
             loss = criterion(student_output, teacher_output, epoch_index)
 
             running_sim_loss += loss.item()
-            if it % 50 == 0:
+            if (it+1) % 50 == 0:
                 last_sim_loss = running_sim_loss / 50
-                tb_x = epoch_index * len(val_data_loader) + it + 1
+                tb_x = it
                 tb_writer.add_scalar('DINOLoss/val', last_sim_loss, tb_x)
                 tb_writer.flush()
                 running_sim_loss = 0.
@@ -291,7 +305,7 @@ class EarlyStopping:
             self.min_val_loss = val_loss
             self.counter = 0
             self.save_checkpoint(model)
-        elif val_loss > self.min_val_loss - self.delta:
+        elif val_loss >= self.min_val_loss - self.delta:
             self.counter += 1
             print(f"Early Stopper count at {self.counter} out of {self.patience}")
             if self.counter >= self.patience:
@@ -360,6 +374,8 @@ if __name__ == '__main__':
         help="""Whether or not to weight normalize the last layer of the DINO head.
         Not normalizing leads to better performance but can make the training unstable.
         In our experiments, we typically set this paramater to False with vit_small and True with vit_base.""")
+    # parser.add_argument('--use_mask', default=True, type=utils.bool_flag,
+    #     help="""Whether or not to mask the zero padded input (zero pT means no particle present) in the transformer encoder.""")
     
     args = parser.parse_args()
     main(args)

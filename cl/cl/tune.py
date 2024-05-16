@@ -26,12 +26,12 @@ from linear_evaluation import accuracy, test_accuracy, AverageMeter
 #Config with hyper params which should be tuned
 config = {
     #"base_lr": tune.loguniform(1e-2, 1),
-    "base_lr": tune.choice([0.025]),
-    "batch_size": tune.choice([1024]),
+    "base_lr": 0.025,
+    "batch_size": 1024,
     #"naive_mask_p": tune.choice([(i+1)/10 for i in range(10)]),
     #"mask_particle": tune.choice([True, False]),
-    "naive_mask_p": tune.choice([0.4]),
-    "mask_particle": tune.choice([True]),
+    "naive_mask_p": 0.4,
+    "mask_particle": True,
     "inv_weight": tune.grid_search([1,10,25]),
     "var_weight": tune.grid_search([1,10,25]),
     "cov_weight": tune.grid_search([1,10,25]),
@@ -41,7 +41,7 @@ def train_tune_params(config, data_dir):
     #Namespace with training/model params
     args = SimpleNamespace(
     #Training params
-    epochs = 30,
+    epochs = 10,
     epochs_eval = 2,
     weight_decay_eval = 1e-6,
     batch_size = config["batch_size"],
