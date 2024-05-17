@@ -71,7 +71,8 @@ def main():
             n_layers=4,
             hidden_dim_dino_head=256,
             bottleneck_dim_dino_head=64,
-            pos_encoding=False
+            pos_encoding=True,
+            use_mask = False,
         )
         transformer_args_small = dict(
         input_dim=3, 
@@ -82,11 +83,12 @@ def main():
         n_layers=4,
         hidden_dim_dino_head=64,
         bottleneck_dim_dino_head=32,
-        pos_encoding=False,
+        pos_encoding=True,
+        use_mask=False,
     )
-        #embed_dim = 64
-        embed_dim=6
-        backbone = TransformerEncoder(**transformer_args_small)
+        embed_dim = 64
+        #embed_dim=6
+        backbone = TransformerEncoder(**transformer_args_standard)
     elif args.arch == "NoEmbedding":
         embed_dim = 57
         backbone = Identity()

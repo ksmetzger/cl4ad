@@ -254,33 +254,41 @@ def get_accuracy(args, state_dict, backbone, head, train_data_loader, val_data_l
     return best_acc.top1
 
 
-def main(config, num_samples=20, cpus_per_trial=4, gpus_per_trial=1, device='cpu'):
+def main(config, num_samples=20, cpus_per_trial=4, gpus_per_trial=1, device='cpu', restore=False):
     data_dir = os.path.abspath('dataset_background_signal.npz')
-    
-    scheduler = ASHAScheduler(
-        metric="accuracy",
-        mode="max",
-        max_t=10,
-        grace_period=5,
-        reduction_factor=2,
-    )
-    result = tune.run(
-        partial(train_tune_params, data_dir=data_dir),
-        resources_per_trial={"cpu": cpus_per_trial, "gpu": gpus_per_trial},
-        config=config,
-        num_samples=num_samples,
-        scheduler=scheduler,
-    )
+    trainable_with_resources = tune.with_resources(partial(train_tune_params, data_dir=data_dir), {"cpu": cpus_per_trial, "gpu": gpus_per_trial})
+    if restore==False:
+        scheduler = ASHAScheduler(
+            #metric="accuracy",
+            #mode="max",
+            max_t=10,
+            grace_period=5,
+            reduction_factor=2,
+        )
+        # result = tune.run(
+        #     partial(train_tune_params, data_dir=data_dir),
+        #     resources_per_trial={"cpu": cpus_per_trial, "gpu": gpus_per_trial},
+        #     config=config,
+        #     num_samples=num_samples,
+        #     scheduler=scheduler,
+        # )
 
-    best_trial = result.get_best_trial("accuracy", "max", "last")
+        tuneConfig = tune.TuneConfig(metric="accuracy", mode="max", scheduler=scheduler, num_samples=num_samples)
+        tuner = tune.Tuner(trainable_with_resources, param_space=config, tune_config=tuneConfig)
+    elif restore:
+        tuner = tune.Tuner.restore(path='C:\\Users\\Kyle\\ray_results\\train_tune_params_2024-05-17_17-03-53', trainable=trainable_with_resources, resume_unfinished=True, restart_errored=True)
+    
+    result = tuner.fit()
+
+    best_trial = result.get_best_result("accuracy", "max", "last")
     print(f"Best trial config: {best_trial.config}")
-    print(f"Best trial final validation loss: {best_trial.last_result['loss']}")
-    print(f"Best trial final validation accuracy: {best_trial.last_result['accuracy']}")
+    print(f"Best trial final validation loss: {best_trial.metrics['loss']}")
+    print(f"Best trial final validation accuracy: {best_trial.metrics['accuracy']}")
 
     best_trained_model = SimpleDense()
     best_trained_model.to(device)
 
-    best_checkpoint = result.get_best_checkpoint(trial=best_trial, metric="accuracy", mode="max")
+    best_checkpoint = best_trial.checkpoint
     with best_checkpoint.as_directory() as checkpoint_dir:
         data_path = Path(checkpoint_dir) / "data.pkl"
         with open(data_path, "rb") as fp:
@@ -300,5 +308,5 @@ if __name__ == "__main__":
         gpus_per_trial = 1
         cpus_per_trial = 4
 
-    main(config, num_samples=1, cpus_per_trial=cpus_per_trial ,gpus_per_trial=gpus_per_trial, device=device)
+    main(config, num_samples=1, cpus_per_trial=cpus_per_trial ,gpus_per_trial=gpus_per_trial, device=device, restore=True)
 
