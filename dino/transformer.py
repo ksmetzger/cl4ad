@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+import matplotlib.pyplot as plt
 
 #Implement transformer (only encoder w/o positional encoding) from "Attention is all you need": https://arxiv.org/pdf/1706.03762.pdf
 #using the implemenation from pytorch, similar to "JetCLR": https://github.com/bmdillon/JetCLR/blob/main/scripts/modules/transformer.py
@@ -72,9 +73,12 @@ class TransformerEncoder(nn.Module):
         pT_zero = torch.repeat_interleave(pT_zero, self.n_heads, axis=0)
         pT_zero = torch.repeat_interleave(pT_zero[:,None], n_const, axis=1)
 
-        mask = torch.zeros(pT_zero.size(0), n_const, n_const)
+        mask = torch.zeros(pT_zero.size(0), n_const, n_const, device=x.device)
         mask[pT_zero] = -np.inf
-        return mask
+        #Add extra const for CLS token, not masked (0)
+        mask_with_cls = torch.zeros(pT_zero.size(0), n_const+1, n_const+1, device=x.device)
+        mask_with_cls[:,1:,1:] = mask
+        return mask_with_cls
 
 
 #Import the projection head for the DINO loss from https://github.com/facebookresearch/dino/blob/main/vision_transformer.py
@@ -119,10 +123,12 @@ class PositionalEncoding(nn.Module):
     def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 1000):
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
+        self.d_model = d_model
+        self.max_len = max_len
 
-        position = torch.arange(max_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
-        pe = torch.zeros(max_len, 1, d_model)
+        position = torch.arange(self.max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, self.d_model, 2) * (-math.log(10000.0) / self.d_model))
+        pe = torch.zeros(self.max_len, 1, self.d_model)
         pe[:, 0, 0::2] = torch.sin(position * div_term)
         pe[:, 0, 1::2] = torch.cos(position * div_term)
         self.register_buffer('pe', pe)
@@ -135,6 +141,20 @@ class PositionalEncoding(nn.Module):
         x = x + self.pe[:x.size(0)]
         return self.dropout(x)
     
+    def visualize(self):
+        plt.imshow(self.pe.reshape(-1,self.d_model), aspect="auto")
+        plt.title("Positional Encoding")
+        plt.xlabel("Encoding Dimension")
+        plt.ylabel("Position Index")
+
+        # set the tick marks for the axes
+        if self.d_model < 10:
+            plt.xticks(torch.arange(0, self.d_model))
+    
+        plt.colorbar()
+        plt.show()
+        
+    
 class Identity(torch.nn.Module):
     def __init__(self):
         super(Identity, self).__init__()
@@ -143,3 +163,21 @@ class Identity(torch.nn.Module):
         return self.identity(x)
     def forward(self, x):
         return self.representation(x)
+    
+if __name__ == "__main__":
+    transformer_args_standard = dict(
+        input_dim=3, 
+        model_dim=64, 
+        output_dim=64, 
+        n_heads=8, 
+        dim_feedforward=256, 
+        n_layers=4,
+        hidden_dim_dino_head=256,
+        bottleneck_dim_dino_head=64,
+        pos_encoding = True,
+        use_mask = False,
+    )
+    #TransformerEncoder(**transformer_args_standard)
+    plot_pos_encoding = PositionalEncoding(d_model=64)
+    plot_pos_encoding.visualize()
+

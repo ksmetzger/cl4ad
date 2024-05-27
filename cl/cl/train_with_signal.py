@@ -1,6 +1,8 @@
 import numpy as np
 from argparse import ArgumentParser
 import matplotlib.pyplot as plt
+import os
+import time, datetime
 
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -8,7 +10,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torchsummary import summary
 
 import losses
-from models import CVAE, SimpleDense, DeepSets
+from models import CVAE, SimpleDense, DeepSets, SimpleDense_small
 import augmentations
 import math
 
@@ -23,6 +25,14 @@ def main(args):
     #Dataset with signals and original divisions=[0.592,0.338,0.067,0.003]
     dataset = np.load(args.dataset)
 
+    #For corruption augm. get min, max, mean, std values of all the features in the training dataset
+    charac_trainset = dict(
+        feat_low = np.min(dataset['x_train'].reshape(-1,57), axis=0), 
+        feat_high = np.max(dataset['x_train'].reshape(-1,57), axis=0),
+        feat_mean = np.mean(dataset['x_train'].reshape(-1,57), axis=0), 
+        feat_std = np.std(dataset['x_train'].reshape(-1,57), axis=0),
+    )
+    
     train_data_loader = DataLoader(
         TorchCLDataset(dataset['x_train'], dataset['labels_train'], device),
         batch_size=args.batch_size,
@@ -38,12 +48,13 @@ def main(args):
         batch_size=args.batch_size,
         shuffle=False)
 
-    model = SimpleDense().to(device)
+    model = SimpleDense(args.latent_dim).to(device)
+    #model = SimpleDense_small().to(device)
     summary(model, input_size=(57,))
 
     # criterion = losses.SimCLRLoss()
     #criterion = losses.VICRegLoss()
-    criterion = losses.SimCLRloss_nolabels_fast()
+    criterion = losses.SimCLRloss_nolabels_fast(temperature=args.loss_temp, base_temperature=args.loss_temp)
     #Standard schedule
     """ optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-3) #Adams pytorch impl. of weight decay is equiv. to the L2 penalty.
     scheduler_1 = torch.optim.lr_scheduler.ConstantLR(optimizer, total_iters=5)
@@ -60,8 +71,7 @@ def main(args):
         running_sim_loss = 0.
         last_sim_loss = 0.
 
-        for idx, val in enumerate(train_data_loader, 1):
-            val = val[0]
+        for idx, (val, labels) in enumerate(train_data_loader, 1):
             # only applicable to the final batch
             if val.shape[0] != args.batch_size:
                 continue
@@ -69,15 +79,24 @@ def main(args):
             # embed entire batch with first value of the batch repeated
             #first_val_repeated = val[0].repeat(args.batch_size, 1)
             #For DeepSets needs input shape (bsz, 19 , 3)
-            embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
+            embedded_values_orig = model(val)
+            #embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
             #embedded_values_orig = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0))
             #embedded_values_aug = model(first_val_repeated)
+            embedded_values_aug = model(augmentations.corruption(val, **charac_trainset, rand_number=0, device=device, mode='gaussian'))
             #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
-            embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
+            #embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
             #embedded_values_aug = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42))
             feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
             #similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,96)), embedded_values_aug.reshape((-1,96)))
+
             similar_embedding_loss = criterion(feature)
+            
+            #For supervised input, only give one view
+            #embedded_values_orig = model(val)
+            #feature = embedded_values_orig.unsqueeze(dim=1)
+
+            #similar_embedding_loss = criterion(feature, labels.reshape(-1))
 
             optimizer.zero_grad()
             similar_embedding_loss.backward()
@@ -97,22 +116,31 @@ def main(args):
         last_sim_loss = 0.
 
         with torch.no_grad():
-            for idx, val in enumerate(val_data_loader, 1):
-                val = val[0]
+            for idx, (val, labels) in enumerate(val_data_loader, 1):
+                #val = val[0]
+                #labels = val[1]
                 if val.shape[0] != args.batch_size:
                     continue
 
                 #first_val_repeated = val[0].repeat(args.batch_size, 1)
-
-                embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
+                embedded_values_orig = model(val)
+                #embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
                 #embedded_values_aug = model(first_val_repeated)
                 #embedded_values_orig = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0))
+                embedded_values_aug = model(augmentations.corruption(val, **charac_trainset, rand_number=0, device=device, mode='gaussian'))
                 #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
-                embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
+                #embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
                 #embedded_values_aug = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42))
                 feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
                 #similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,96)), embedded_values_aug.reshape((-1,96)))
+                
                 similar_embedding_loss = criterion(feature)
+
+                #For supervised input, only give one view
+                #embedded_values_orig = model(val)
+                #feature = embedded_values_orig.unsqueeze(dim=1)
+                
+                #similar_embedding_loss = criterion(feature, labels.reshape(-1))
 
                 running_sim_loss += similar_embedding_loss.item()
                 if idx % 50 == 0:
@@ -130,12 +158,16 @@ def main(args):
         train_losses = []
         val_losses = []
         #Initialize the Early Stopper
-        EarlyStopper = EarlyStopping(patience=5, delta=0, path=args.model_name, verbose=True)
+        folder = "output\checkpoints"
+        os.makedirs(folder, exist_ok=True)
+        EarlyStopper = EarlyStopping(patience=5, delta=0, path=os.path.join(folder,args.model_name), verbose=True)
+        start_time = time.time()
 
         for epoch in range(1, args.epochs+1):
             print(f'EPOCH {epoch}')
+            temp_time= time.time()
             #Adjust the learning rate with Version 2 schedule (see OneNote)
-            lr = adjust_learning_rate(args, 10, epoch, optimizer, base_lr=0.0125)
+            lr = adjust_learning_rate(args, 10, epoch, optimizer, base_lr=0.025)
             print("current Learning rate: ", lr)
             writer.add_scalar('Learning_rate', lr, epoch)
             # Gradient tracking
@@ -148,7 +180,9 @@ def main(args):
             avg_val_loss = val_one_epoch(epoch, writer)
             val_losses.append(avg_val_loss)
 
+            temp_time = time.time()-temp_time
             print(f"Train/Val Sim Loss after epoch: {avg_train_loss:.4f}/{avg_val_loss:.4f}")
+            print(f"taking {temp_time:.1f}s to complete")
 
             #Check whether to EarlyStop
             EarlyStopper(avg_val_loss, model, epoch)
@@ -158,6 +192,9 @@ def main(args):
             #scheduler.step()
         writer.flush()
         #torch.save(model.state_dict(), args.model_name)
+        total_time = time.time() - start_time
+        total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+        print('Training time {}'.format(total_time_str))
 
         plt.plot(train_losses, label='train')
         plt.plot(val_losses, label='val')
@@ -263,6 +300,9 @@ class TorchCLDataset(Dataset):
   def __init__(self, features, labels, device):
         'Initialization'
         self.device = device
+        self.mean = np.mean(features)
+        self.std = np.std(features)
+        #print(f"Mean: {self.mean} and std: {self.std}")
         self.features = torch.from_numpy(features).to(dtype=torch.float32, device=self.device)
         self.labels = torch.from_numpy(labels).to(dtype=torch.float32, device=self.device)
 
@@ -275,6 +315,8 @@ class TorchCLDataset(Dataset):
         # Load data and get label
         X = self.features[index]
         y = self.labels[index]
+        #Normalize again (!!! has already been pre-normalized with z_score pT norm.)
+        #X = (X-self.mean)/self.std
 
         return X, y
 
@@ -306,7 +348,7 @@ class EarlyStopping:
                 print(f"Validation loss lowered from {self.min_val_loss:.4f} ---> to {val_loss:.4f} and the model was saved!")
             self.min_val_loss = val_loss
             self.counter = 0
-            self.save_checkpoint(model)
+            self.save_checkpoint(model, epoch)
         elif val_loss >= self.min_val_loss - self.delta:
             self.counter += 1
             print(f"Early Stopper count at {self.counter} out of {self.patience}")
@@ -316,9 +358,10 @@ class EarlyStopping:
         else:
             assert(False)
                 
-    def save_checkpoint(self, model):
+    def save_checkpoint(self, model, epoch):
         '''Saves the model if the val_loss is decreasing'''
-        torch.save(model.state_dict(), self.path)
+        file_path = f"{self.path}_ep_{epoch}.pth"
+        torch.save(model.state_dict(), file_path)
 
 if __name__ == '__main__':
     # Parses terminal command
@@ -330,11 +373,12 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=1)
     parser.add_argument('--batch-size', type=int, default=1024)
     parser.add_argument('--loss-temp', type=float, default=0.07)
-    parser.add_argument('--model-name', type=str, default='output/vae.pth')
+    parser.add_argument('--model-name', type=str, default='SimpleDense_Small')
     parser.add_argument('--scaling-filename', type=str)
     parser.add_argument('--output-filename', type=str, default='output/embedding.npz')
     parser.add_argument('--sample-size', type=int, default=-1)
     parser.add_argument('--mix-in-anomalies', action='store_true')
+    parser.add_argument('--latent-dim', type=int, default=48)
     parser.add_argument('--train', action='store_true')
 
     args = parser.parse_args()

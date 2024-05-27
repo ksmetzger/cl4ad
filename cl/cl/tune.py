@@ -16,6 +16,7 @@ import ray.cloudpickle as pickle
 from ray.train import Checkpoint, session, get_checkpoint, report
 from ray import train
 from ray.tune.schedulers import ASHAScheduler
+from ray.tune.search.optuna import OptunaSearch
 from types import SimpleNamespace
 from models import SimpleDense
 import losses
@@ -272,11 +273,13 @@ def main(config, num_samples=20, cpus_per_trial=4, gpus_per_trial=1, device='cpu
         #     num_samples=num_samples,
         #     scheduler=scheduler,
         # )
-
-        tuneConfig = tune.TuneConfig(metric="accuracy", mode="max", scheduler=scheduler, num_samples=num_samples)
+        #Implement search algorithm other than standard Random/GridSearch
+        optuna_search = OptunaSearch()
+        
+        tuneConfig = tune.TuneConfig(metric="accuracy", mode="max", scheduler=scheduler, num_samples=num_samples, search_alg=optuna_search)
         tuner = tune.Tuner(trainable_with_resources, param_space=config, tune_config=tuneConfig)
     elif restore:
-        tuner = tune.Tuner.restore(path='C:\\Users\\Kyle\\ray_results\\train_tune_params_2024-05-17_17-03-53', trainable=trainable_with_resources, resume_unfinished=True, restart_errored=True)
+        tuner = tune.Tuner.restore(path='C:\\Users\\Kyle\\ray_results\\train_tune_params_2024-05-17_17-40-29', trainable=trainable_with_resources, resume_unfinished=True, restart_errored=True, param_space=config)
     
     result = tuner.fit()
 

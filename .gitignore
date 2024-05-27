@@ -14,3 +14,4 @@ deep/
 results
 latent
 output_tuner
+*.pth

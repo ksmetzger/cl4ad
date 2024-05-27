@@ -3,8 +3,7 @@ import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import DataLoader, Dataset
 import losses
-from dataset import TorchCLDataset, CLBackgroundDataset, CLSignalDataset, CLBackgroundSignalDataset
-from models import CVAE, SimpleDense, DeepSets, Identity
+from models import CVAE, SimpleDense, DeepSets, Identity, SimpleDense_small
 import augmentations
 import argparse
 from pathlib import Path
@@ -70,6 +69,9 @@ def main():
     elif args.arch == "NoEmbedding":
         embed_dim = 57
         backbone = Identity()
+    elif args.arch == "SimpleDense_small":
+        embed_dim = 6
+        backbone = SimpleDense_small()
     else: warnings.warn("Model architecture is not listed")
 
     #Load state_dict of embedding and freeze the layers
@@ -77,6 +79,10 @@ def main():
     backbone.load_state_dict(state_dict=state_dict, strict=False)
     
     head = nn.Linear(embed_dim, args.num_classes)
+    # head = nn.Sequential(
+    #     nn.Linear(embed_dim, 48),
+    #     nn.Linear(48, args.num_classes)
+    # )
     head.weight.data.normal_(mean=0.0, std=0.01)
     head.bias.data.zero_()
 
@@ -267,6 +273,30 @@ def load_data(data_dir=''):
     x_test, labels_test = dataset['x_test'], dataset['labels_test']
     x_val, labels_val = dataset['x_val'], dataset['labels_val']
     return x_train, x_test, x_val, labels_train, labels_test, labels_val
+
+class TorchCLDataset(Dataset):
+  'Characterizes a dataset for PyTorch'
+  def __init__(self, features, labels, device):
+        'Initialization'
+        self.device = device
+        self.mean = np.mean(features)
+        self.std = np.std(features)
+        self.features = torch.from_numpy(features).to(dtype=torch.float32, device=self.device)
+        self.labels = torch.from_numpy(labels).to(dtype=torch.float32, device=self.device)
+
+  def __len__(self):
+        'Denotes the total number of samples'
+        return len(self.features)
+
+  def __getitem__(self, index):
+        'Generates one sample of data'
+        # Load data and get label
+        X = self.features[index]
+        y = self.labels[index]
+        #Normalize again (!!! has already been pre-normalized with z_score pT norm.)
+        #X = (X-self.mean)/self.std
+
+        return X, y
 
 if __name__ == "__main__":
     main()

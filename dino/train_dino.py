@@ -175,7 +175,7 @@ def main(args):
             embedded_values_aug_teacher = teacher(augmentations.naive_masking(val, device=device, rand_number=42, p=0.5, mask_full_particle=False).reshape(-1,19,3))
             teacher_output = torch.cat([embedded_values_orig_teacher,embedded_values_aug_teacher],dim=0)
             student_output = torch.cat([embedded_values_orig_student,embedded_values_aug_student],dim=0)
-            loss = criterion(student_output, teacher_output, epoch_index)
+            loss = criterion(student_output, teacher_output, epoch_index-1)
 
             running_sim_loss += loss.item()
             if (it+1) % 50 == 0:
@@ -194,7 +194,7 @@ def main(args):
         val_losses = []
         start_time = time.time()
         #Initialize the Early Stopper
-        EarlyStopper = EarlyStopping(patience=5, delta=0, path=args.model_name, verbose=True)
+        #EarlyStopper = EarlyStopping(patience=5, delta=0, path=args.model_name, verbose=True)
         print("Starting DINO training !")
         for epoch in range(1, args.epochs+1):
             print(f'EPOCH {epoch}')
@@ -214,13 +214,13 @@ def main(args):
             print(f"taking {temp_time:.1f}s to complete")
 
             #Check whether to EarlyStop
-            EarlyStopper(avg_val_loss, [teacher, student], epoch)
+            """ EarlyStopper(avg_val_loss, [teacher, student], epoch)
             if EarlyStopper.early_stop:
-                break
+                break """
 
         #Save both networks for now
-        #torch.save(student.state_dict(), os.path.join(os.getcwd(), "_student_" + args.model_name))
-        #torch.save(teacher.state_dict(), os.path.join(os.getcwd(), "_teacher_" + args.model_name))
+        torch.save(student.state_dict(), os.path.join(os.getcwd(), "_student_" + args.model_name))
+        torch.save(teacher.state_dict(), os.path.join(os.getcwd(), "_teacher_" + args.model_name))
         #Add timing and print it
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))

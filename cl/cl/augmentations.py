@@ -162,3 +162,33 @@ def detector_crop(input_batch, device=None, rand_number=0, crop_size = 5.0):
     input_numpy[~mask] = 0.0
     resampled_batch = torch.from_numpy(input_numpy.reshape(-1,57)).to(dtype=torch.float32, device=device)
     return resampled_batch
+
+def corruption(input_batch, feat_low, feat_high, feat_mean, feat_std, mode=None, device=None, rand_number=0, corruption_rate=0.6):
+    '''
+    Applies the augmentation "corruption" to events in a batch (torch tensor) and outputs a torch tensor values randomly masked with probability p.
+    From: https://arxiv.org/pdf/2106.15147 SCARF corruption method
+    Args:
+        input_batch: (batch_size, 57) flattened input
+        mode: choice('uniform', 'gaussian') which determines which distribution to sample from
+        device: cuda or cpu depending on input
+        corruption_rate: probability of corruption (default: 0.6)
+        feat_low, feat_high: (57,) Expects input of min, max of all the features in the training dataset
+    Returns:
+        resampled_batch: (batch_size, 57) permutated output
+    '''
+    np.random.seed(rand_number)
+    input_numpy = input_batch.cpu().detach().numpy().reshape(-1)
+    #Make mask with given feature corruption rate, treat each of the 57 features seperately (no full_particle_corruption)
+    mask = np.random.choice([True, False], size=input_numpy.shape[0], replace=True, p=[corruption_rate, 1-corruption_rate])
+    mask = mask.reshape(-1,57)
+
+    if mode=='uniform' or mode==None:
+        #Sample the batch by drawing from a uniform distribution given by the min, max values of the training dataset
+        marginals = np.random.uniform(feat_low, feat_high, size=mask.shape)
+    elif mode=='gaussian':
+        marginals = np.random.normal(feat_mean, feat_std, size=mask.shape)
+    
+    resampled_batch = np.where(mask, marginals, input_numpy.reshape(-1,57))
+
+    resampled_batch = torch.from_numpy(input_numpy.reshape(-1,57)).to(dtype=torch.float32, device=device)
+    return resampled_batch
