@@ -13,6 +13,7 @@ import os
 from torch.utils.tensorboard import SummaryWriter
 from itertools import cycle
 import time
+from models.models_cl import SimpleDense, SimpleDense_small, Identity
 
 
 def train(args, model, device, train_label_loader, train_unlabel_loader, optimizer, m, epoch, tf_writer):
@@ -20,7 +21,9 @@ def train(args, model, device, train_label_loader, train_unlabel_loader, optimiz
 
     
     bce = nn.BCELoss()
-    m = min(m, 0.5)
+    #Change the strength of the adaptive uncertainty with a factor lambda_uncert
+    lambda_uncert = 1.
+    m = min(m, 0.5) * lambda_uncert
     ce = MarginLoss(m=-1*m)
     unlabel_loader_iter = cycle(train_unlabel_loader)
     bce_losses = AverageMeter('bce_loss', ':.4e')
@@ -75,7 +78,9 @@ def train(args, model, device, train_label_loader, train_unlabel_loader, optimiz
         ce_loss = ce(output[:labeled_len], target)
         entropy_loss = entropy(torch.mean(prob, 0))
         
-        loss = - entropy_loss + ce_loss + bce_loss
+        #Try weighing the pairwise objective (bce_loss) more
+        pairwise_weight = 1.
+        loss = - entropy_loss + ce_loss + pairwise_weight* bce_loss
 
         bce_losses.update(bce_loss.item(), args.batch_size)
         ce_losses.update(ce_loss.item(), args.batch_size)
@@ -138,18 +143,22 @@ def test(args, model, labeled_num, device, test_loader, epoch, tf_writer):
 
 def main():
     parser = argparse.ArgumentParser(description='orca')
-    parser.add_argument('--milestones', nargs='+', type=int, default=[140, 180]) #Changed from [140,180] to [50,90]
+    parser.add_argument('--milestones', nargs='+', type=int, default=[10, 20]) #Changed from [140,180] to [50,90]
     parser.add_argument('--dataset', default='cifar100', help='dataset setting')
-    parser.add_argument('--labeled-num', default=50, type=int)
+    parser.add_argument('--labeled-num', default=4, type=int)
     parser.add_argument('--labeled-ratio', default=0.5, type=float)
     parser.add_argument('--seed', type=int, default=1, metavar='S', help='random seed (default: 1)')
     parser.add_argument('--name', type=str, default='debug')
     parser.add_argument('--exp_root', type=str, default='./results/')
-    parser.add_argument('--epochs', type=int, default=200)
+    parser.add_argument('--epochs', type=int, default=30)
     parser.add_argument('-b', '--batch-size', default=1024, type=int,
                     metavar='N',
                     help='mini-batch size')
-    parser.add_argument('--size', default='large')
+    parser.add_argument('--size', type=str, default='large')
+    parser.add_argument('--runs', type=str, default='runs59')
+    parser.add_argument('--latent-dim', type=int, default=48)
+    parser.add_argument('--finetune', action='store_true')
+
     args = parser.parse_args()
     args.cuda = torch.cuda.is_available()
     print("Is cuda available: ", args.cuda)
@@ -195,6 +204,13 @@ def main():
         test_set = datasets.BACKGROUND_SIGNAL_CVAE_LATENT_PYTORCH(root='./datasets',datatype='test', transform=datasets.dict_transform['cifar_test_kyle_cvae'])
         num_classes = 8
         args.labeled_num = 4
+    elif args.dataset == 'background_with_signal_inference_latent':
+        num_classes = 8
+        args.labeled_num = 4
+        train_label_set = datasets.BACKGROUND_SIGNAL_INFERENCE_LATENT(root='./datasets',datatype='train_labeled', runs=args.runs, latent_dim=args.latent_dim, labeled_num=args.labeled_num, finetune=args.finetune, transform=TransformTwice(datasets.dict_transform['cifar_train_kyle_cvae']))
+        train_unlabel_set = datasets.BACKGROUND_SIGNAL_INFERENCE_LATENT(root='./datasets',datatype='train_unlabeled', runs=args.runs, latent_dim=args.latent_dim, labeled_num=args.labeled_num, finetune=args.finetune, transform=TransformTwice(datasets.dict_transform['cifar_train_kyle_cvae']))
+        test_set = datasets.BACKGROUND_SIGNAL_INFERENCE_LATENT(root='./datasets',datatype='test', runs=args.runs, latent_dim=args.latent_dim, labeled_num=args.labeled_num, finetune=args.finetune, transform=datasets.dict_transform['cifar_test_kyle_cvae'])
+        
     else:
         warnings.warn('Dataset is not listed')
         return
@@ -219,22 +235,45 @@ def main():
             model = models.CVAE_direct(num_classes=num_classes)
         elif args.size == 'simple':
             model = models.CVAE_direct_simple(num_classes=num_classes)
+            #model = models.Dense_latent_simple(num_classes=num_classes, latent_dim=57)
     elif args.dataset == 'background_with_signal_cvae_latent':
         if args.size == 'large':
             model = models.CVAE_latent(num_classes=num_classes)
         elif args.size == 'simple':
             model = models.CVAE_latent_simple(num_classes=num_classes)
-    elif args.dataset == 'background_with_signal_dense_latent':
+    elif args.dataset == 'background_with_signal_dense_latent' or args.dataset=='background_with_signal_inference_latent':
         if args.size == 'simple':
-            model = models.Dense_latent_simple(num_classes=num_classes)
+            model = models.Dense_latent_simple(num_classes=num_classes, latent_dim=args.latent_dim)
+            #model = models.CVAE_latent(num_classes=num_classes)
         elif args.size == 'large':
-            model = models.Dense_latent_large(num_classes=num_classes)
+            model = models.Dense_latent_large(num_classes=num_classes, latent_dim=args.latent_dim)
     else:
         warnings.warn('Model is not listed')
         return
-    
+    #If finetune, add embedding model to finetune layers with ORCA objective
+    if args.finetune:
+        #Load pretrained weights
+        drive_path = f'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\'
+        if args.latent_dim == 48:
+            finetune = SimpleDense(args.latent_dim)
+            finetune.load_state_dict(torch.load(drive_path+f'output/{args.runs}/vae.pth', map_location=torch.device(device)))
+        elif args.latent_dim == 6:
+            finetune = SimpleDense_small(args.latent_dim)
+            finetune.load_state_dict(torch.load(drive_path+f'output/{args.runs}/vae.pth', map_location=torch.device(device)))
+        
+        finetune.expander = nn.Identity()
+        model = nn.Sequential(finetune, model)
+        
+        #Freeze every layer except for the last one of the embedding backbone (finetune)
+        # for param in finetune.parameters():
+        #     param.requires_grad = False
+        # for param in finetune[-1].parameters():
+        #     param.requires_grad = True
+        #Watch out for batchnorm in eval vs train mode if freezing certain layers?
+
     model = model.to(device)
     model = model.float()
+
 
     #Print the name and parameters of the model
     for name, param in model.named_parameters():

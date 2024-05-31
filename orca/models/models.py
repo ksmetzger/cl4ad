@@ -135,12 +135,13 @@ class CVAE_direct_simple(nn.Module):
     
 #Simpler two-layer model starting directly from the larger embedding trained with both background + signal
 class Dense_latent_simple(nn.Module):
-    def __init__(self, num_classes = 8):
+    def __init__(self, num_classes = 8, latent_dim = 48):
         super(Dense_latent_simple, self).__init__()
         self.num_classes = num_classes
+        self.latent_dim = latent_dim
         
         self.encoder = torch.nn.Sequential(
-            nn.Linear(48,24),  
+            nn.Linear(self.latent_dim,24),  
             nn.BatchNorm1d(24),
             nn.LeakyReLU(),
             nn.Dropout(),          
@@ -159,12 +160,13 @@ class Dense_latent_simple(nn.Module):
     
 #Larger 5-layer model starting from the larger embedding trained with both background + signal
 class Dense_latent_large(nn.Module):
-    def __init__(self, num_classes = 8):
+    def __init__(self, num_classes = 8, latent_dim = 48):
         super(Dense_latent_large, self).__init__()
         self.num_classes = num_classes
+        self.latent_dim = latent_dim
         
         self.encoder = torch.nn.Sequential(
-            nn.Linear(48,64),          #Dimensionality of Delphes input (57)
+            nn.Linear(self.latent_dim,64),          #Dimensionality of latent input
             nn.BatchNorm1d(64),
             nn.LeakyReLU(),
             nn.Dropout(),              

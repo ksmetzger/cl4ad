@@ -46,7 +46,8 @@ def main(args):
     transformer_args_standard = dict(
         input_dim=3, 
         model_dim=64, 
-        output_dim=args.out_dim, 
+        output_dim=args.out_dim,
+        embed_dim=6, 
         n_heads=8, 
         dim_feedforward=256, 
         n_layers=4,

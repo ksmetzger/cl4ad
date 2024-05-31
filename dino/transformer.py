@@ -8,12 +8,13 @@ import matplotlib.pyplot as plt
 #Implement transformer (only encoder w/o positional encoding) from "Attention is all you need": https://arxiv.org/pdf/1706.03762.pdf
 #using the implemenation from pytorch, similar to "JetCLR": https://github.com/bmdillon/JetCLR/blob/main/scripts/modules/transformer.py
 class TransformerEncoder(nn.Module):
-    def __init__(self,input_dim=3, model_dim=512, output_dim=512, n_heads=8, dim_feedforward=2048, n_layers=6, hidden_dim_dino_head=2048, bottleneck_dim_dino_head=256, head_norm=False, 
+    def __init__(self,input_dim=3, model_dim=512, output_dim=512, embed_dim=64, n_heads=8, dim_feedforward=2048, n_layers=6, hidden_dim_dino_head=2048, bottleneck_dim_dino_head=256, head_norm=False, 
                  dropout=0.1, norm_last_layer=True, pos_encoding=False, use_mask=False):
         super(TransformerEncoder, self).__init__()
         self.input_dim = input_dim
         self.model_dim = model_dim
         self.output_dim = output_dim
+        self.embed_dim = embed_dim
         self.n_heads = n_heads
         self.dim_feedforward = dim_feedforward
         self.n_layers = n_layers
@@ -29,11 +30,13 @@ class TransformerEncoder(nn.Module):
         self.embedding = nn.Linear(input_dim, model_dim)
         #Get a pre-norm tranformer encoder from pytorch
         self.transformer = nn.TransformerEncoder(nn.TransformerEncoderLayer(model_dim, n_heads, dim_feedforward=dim_feedforward, dropout=dropout, norm_first=True), n_layers)
-        self.dino_head = DINOHead(in_dim=self.model_dim, out_dim=self.output_dim, hidden_dim=self.hidden_dim_dino_head, bottleneck_dim=self.bottleneck_dim_dino_head, norm_last_layer=self.norm_last_layer)
+        self.dino_head = DINOHead(in_dim=self.embed_dim, out_dim=self.output_dim, hidden_dim=self.hidden_dim_dino_head, bottleneck_dim=self.bottleneck_dim_dino_head, norm_last_layer=self.norm_last_layer)
         #Define [CLS] token for aggregate result where head attaches
         self.cls_token = nn.Parameter(torch.zeros(1, 1, model_dim))
         #If pos_encoding = True, create and apply the positional encoding to the input
         self.pos_encoder = PositionalEncoding(self.model_dim, self.dropout)
+        #In order to downsize to a smaller embedding without lowering the model_dim, append an MLP to the CLS token
+        self.downsize = MLP(input_dim=model_dim, embed_dim=embed_dim, hidden_channels=[32])
     
     #Embedding output without the DINO head
     def representation(self, x, mask=None):
@@ -52,6 +55,8 @@ class TransformerEncoder(nn.Module):
         x = self.transformer(x, mask=mask)
         #Only take [CLS] token and input into DINO head
         x = x[0,...]
+        #If downsize to lower dimension run throught the MLP
+        x = self.downsize(x)
         return x
     
     #For now the implementation does not use masking like in JetCLR, might be revisited later.
@@ -153,8 +158,27 @@ class PositionalEncoding(nn.Module):
     
         plt.colorbar()
         plt.show()
+
+class MLP(torch.nn.Module):
+    '''
+    Define MLP in order to downsize embedding from transformer model_dim (input_dim) to embed_dim. 
+    Don't use batchnorm normalization as it's also not used in DINO head.
+    '''
+    def __init__(self, input_dim = 64, embed_dim = 6, hidden_channels=None, act_layer=nn.ReLU, bias=True):
+        super(MLP, self).__init__()
+        layers = []
+        in_dim = input_dim
+        for hidden_dim in hidden_channels:
+            layers.append(nn.Linear(in_dim, hidden_dim, bias=bias))
+            layers.append(act_layer())
+            in_dim = hidden_dim
+        layers.append(nn.Linear(in_dim, embed_dim, bias=bias))
         
-    
+        self.layers = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.layers(x)
+
 class Identity(torch.nn.Module):
     def __init__(self):
         super(Identity, self).__init__()
@@ -169,6 +193,7 @@ if __name__ == "__main__":
         input_dim=3, 
         model_dim=64, 
         output_dim=64, 
+        embed_dim=6,
         n_heads=8, 
         dim_feedforward=256, 
         n_layers=4,

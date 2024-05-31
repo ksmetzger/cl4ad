@@ -65,7 +65,8 @@ def main():
         transformer_args_standard = dict(
             input_dim=3, 
             model_dim=64, 
-            output_dim=64, 
+            output_dim=64,
+            embed_dim=6, 
             n_heads=8, 
             dim_feedforward=256, 
             n_layers=4,
@@ -86,8 +87,9 @@ def main():
         pos_encoding=True,
         use_mask=False,
     )
-        embed_dim = 64
+        #embed_dim = 64
         #embed_dim=6
+        embed_dim = transformer_args_standard["embed_dim"]
         backbone = TransformerEncoder(**transformer_args_standard)
     elif args.arch == "NoEmbedding":
         embed_dim = 57

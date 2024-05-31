@@ -18,6 +18,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.utils import shuffle
 import warnings
 import torch
+from models.models_cl import SimpleDense, SimpleDense_small
 
 class BACKGROUND(Dataset):
 
@@ -165,7 +166,7 @@ class BACKGROUND_SIGNAL_CVAE(Dataset):
     def __init__(self, root, datatype, rand_number=0, transform=None, target_transform=None):
         
         #Import the background + signals + labels
-        drive_path = ''
+        drive_path = f'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\'
         background_IDs = np.load(drive_path+'background_IDs_-1.npz')
         background = np.load(drive_path+'datasets_-1.npz')
         signals = np.load(drive_path+'bsm_datasets_-1.npz')
@@ -400,7 +401,131 @@ class BACKGROUND_SIGNAL_DENSE_LATENT(Dataset):
         image = self.transform(image)
         #label = self.target_transform(label)
         return image, label
+    
+class BACKGROUND_SIGNAL_INFERENCE_LATENT(Dataset):
+    def __init__(self, root, datatype, runs, latent_dim, labeled_num = 4, rand_number=0, finetune=False ,transform=None, target_transform=None):
+        super(BACKGROUND_SIGNAL_INFERENCE_LATENT, self).__init__()
+        #Import the background + signals + labels
+        self.runs = runs
+        self.latent_dim = latent_dim
+        if finetune: #If finetuning start from orginal DELPHES input dimension (57D)
+            self.latent_dim = 57
+        self.labeled_num = labeled_num
+
+        drive_path = f'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\'
+        #Run inference to get the embedding of the test set for further use in ORCA
+        dataset = np.load(drive_path+'dataset_background_signal.npz')
+        labels_test = dataset['labels_test'].reshape(-1)
+        data_test = dataset['x_test']
+        if finetune == False:
+            embedded_test = self.inference(drive_path + f'output/{self.runs}/vae.pth', data_test, labels_test)
+        elif finetune:
+            embedded_test = data_test
         
+        #Transformations
+        self.transform = transform
+        self.target_transform = transforms.ToTensor()
+        
+        ###Random sample 1/2 of the background for labeled data, 1/2 of background + signals 1/2 for unlabeled data
+        #Random sample the background
+        np.random.seed(rand_number)
+        size_fraction_background = 1/2
+        size_fraction_signal = 1/2
+        labeled_background, unlabeled_data, labeled_targets, unlabeled_targets = train_test_split(embedded_test, labels_test, test_size=size_fraction_background, train_size =size_fraction_background ,random_state=rand_number)
+        self.mean_background = np.mean(labeled_background)
+        self.std_background = np.std(labeled_background)
+        
+        #Finally mask out the signal parts for the labeled background
+        mask = (labeled_targets < self.labeled_num)
+        labeled_background = labeled_background[mask]
+        labeled_targets = labeled_targets[mask]
+       
+        if datatype == 'train_labeled':
+            self.data = labeled_background
+            self.targets = labeled_targets
+     
+        elif datatype == 'train_unlabeled':
+            self.data = unlabeled_data
+            self.targets = unlabeled_targets
+            
+        elif datatype == 'test':
+            self.data = unlabeled_data
+            self.targets = unlabeled_targets
+        else:
+            warnings.warn('Type of dataset not available')
+            return
+        
+        
+        #Reshape the data
+        self.targets = self.targets.astype(int)
+        self.targets = self.targets.tolist()
+        self.data = np.vstack(self.data).reshape(-1, self.latent_dim)
+        
+        #Print the shapes of data + targets
+        print(np.shape(self.data))
+        print(np.shape(self.targets))
+        print(type(self.targets[0]))
+
+    #Define inference if there is no embedding.npz/anomalies_embedding.npz already saved, in order to use for feeding embedding to ORCA
+    def inference(self, model_name, input_data, input_labels, device=None):
+        '''
+        Inference for test input with dimensionality (-1, 57) using model SimpleDense()/SimpleDense_small().
+        '''
+        if device == None:
+            device = torch.device('cpu')
+        else: 
+            device = device
+        #Import model for embedding
+        if self.latent_dim == 48:
+            model = SimpleDense(self.latent_dim).to(device)
+        elif self.latent_dim == 6:
+            model = SimpleDense_small(self.latent_dim).to(device)
+        model.load_state_dict(torch.load(model_name, map_location=torch.device(device)))
+        model.eval()
+        #Get output with dataloader
+        data_loader = data.DataLoader(
+            TorchCLDataset(input_data, input_labels, device),
+            batch_size=1024,
+            shuffle=False)
+        with torch.no_grad():
+            output = np.concatenate([model.representation(data).cpu().detach().numpy() for (data, label) in data_loader], axis=0)
+        return output
+    
+    def __len__(self):
+        return len(self.targets)
+    
+    def __getitem__(self, idx):
+        image = self.data[idx]
+        image = torch.from_numpy(image) #Turn numpy array into tensor()
+        image = (image-self.mean_background)/self.std_background  #Normalize the data to mean: 0, std: 1
+        label = self.targets[idx]
+        image = self.transform(image)
+        #label = self.target_transform(label)
+        return image, label
+class TorchCLDataset(Dataset):
+  'Characterizes a dataset for PyTorch'
+  def __init__(self, features, labels, device):
+        'Initialization'
+        self.device = device
+        self.mean = np.mean(features)
+        self.std = np.std(features)
+        #print(f"Mean: {self.mean} and std: {self.std}")
+        self.features = torch.from_numpy(features).to(dtype=torch.float32, device=self.device)
+        self.labels = torch.from_numpy(labels).to(dtype=torch.float32, device=self.device)
+
+  def __len__(self):
+        'Denotes the total number of samples'
+        return len(self.features)
+
+  def __getitem__(self, index):
+        'Generates one sample of data'
+        # Load data and get label
+        X = self.features[index]
+        y = self.labels[index]
+        #Normalize again (!!! has already been pre-normalized with z_score pT norm.)
+        #X = (X-self.mean)/self.std
+
+        return X, y 
 
 class BACKGROUND_SIGNAL_CVAE_LATENT_PYTORCH(Dataset):
 
