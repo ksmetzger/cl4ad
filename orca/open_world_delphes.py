@@ -18,7 +18,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.utils import shuffle
 import warnings
 import torch
-from models.models_cl import SimpleDense, SimpleDense_small
+from models.models_cl import SimpleDense, SimpleDense_small, TransformerEncoder, transformer_args_standard
 
 class BACKGROUND(Dataset):
 
@@ -403,7 +403,11 @@ class BACKGROUND_SIGNAL_DENSE_LATENT(Dataset):
         return image, label
     
 class BACKGROUND_SIGNAL_INFERENCE_LATENT(Dataset):
-    def __init__(self, root, datatype, runs, latent_dim, labeled_num = 4, rand_number=0, finetune=False ,transform=None, target_transform=None):
+    def __init__(self, root, datatype, runs, latent_dim, labeled_num = 4, rand_number=0, finetune=False ,transform=None, target_transform=None, embedding_type = 'mlp'):
+        '''
+        Define the ORCA input dataclass without explicitly inputting the embedding files but instead doing inference on the saved model weights.
+        embedding_type: Describes the architecture used to get the neural embedding choice = ('mlp', 'dino_transformer'), default = 'mlp'
+        '''
         super(BACKGROUND_SIGNAL_INFERENCE_LATENT, self).__init__()
         #Import the background + signals + labels
         self.runs = runs
@@ -411,14 +415,17 @@ class BACKGROUND_SIGNAL_INFERENCE_LATENT(Dataset):
         if finetune: #If finetuning start from orginal DELPHES input dimension (57D)
             self.latent_dim = 57
         self.labeled_num = labeled_num
-
         drive_path = f'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\'
         #Run inference to get the embedding of the test set for further use in ORCA
         dataset = np.load(drive_path+'dataset_background_signal.npz')
         labels_test = dataset['labels_test'].reshape(-1)
         data_test = dataset['x_test']
+        
+        if embedding_type == 'dino_transformer':
+            drive_path = f'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\dino\\'
+            data_test = data_test.reshape(-1,19,3)
         if finetune == False:
-            embedded_test = self.inference(drive_path + f'output/{self.runs}/vae.pth', data_test, labels_test)
+            embedded_test = self.inference(drive_path + f'output/{self.runs}/', data_test, labels_test, embedding_type=embedding_type)
         elif finetune:
             embedded_test = data_test
         
@@ -459,7 +466,7 @@ class BACKGROUND_SIGNAL_INFERENCE_LATENT(Dataset):
         #Reshape the data
         self.targets = self.targets.astype(int)
         self.targets = self.targets.tolist()
-        self.data = np.vstack(self.data).reshape(-1, self.latent_dim)
+        #self.data = np.vstack(self.data).reshape(-1, self.latent_dim)
         
         #Print the shapes of data + targets
         print(np.shape(self.data))
@@ -467,7 +474,7 @@ class BACKGROUND_SIGNAL_INFERENCE_LATENT(Dataset):
         print(type(self.targets[0]))
 
     #Define inference if there is no embedding.npz/anomalies_embedding.npz already saved, in order to use for feeding embedding to ORCA
-    def inference(self, model_name, input_data, input_labels, device=None):
+    def inference(self, model_name, input_data, input_labels, embedding_type, device=None):
         '''
         Inference for test input with dimensionality (-1, 57) using model SimpleDense()/SimpleDense_small().
         '''
@@ -475,12 +482,18 @@ class BACKGROUND_SIGNAL_INFERENCE_LATENT(Dataset):
             device = torch.device('cpu')
         else: 
             device = device
-        #Import model for embedding
-        if self.latent_dim == 48:
-            model = SimpleDense(self.latent_dim).to(device)
-        elif self.latent_dim == 6:
-            model = SimpleDense_small(self.latent_dim).to(device)
-        model.load_state_dict(torch.load(model_name, map_location=torch.device(device)))
+        #Import model for embedding depending on embedding_type
+        if embedding_type == 'mlp':
+            if self.latent_dim == 48:
+                model = SimpleDense(self.latent_dim).to(device)
+            elif self.latent_dim == 6:
+                model = SimpleDense_small(self.latent_dim).to(device)
+            
+            model.load_state_dict(torch.load(model_name + 'vae.pth', map_location=torch.device(device)))
+        elif embedding_type == 'dino_transformer':
+            model = TransformerEncoder(**transformer_args_standard)
+            model.load_state_dict(torch.load(model_name + '_teacher_dino_transformer.pth', map_location=torch.device(device)))
+
         model.eval()
         #Get output with dataloader
         data_loader = data.DataLoader(

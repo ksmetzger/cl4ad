@@ -13,13 +13,16 @@ import os
 from torch.utils.tensorboard import SummaryWriter
 from itertools import cycle
 import time
-from models.models_cl import SimpleDense, SimpleDense_small, Identity
+from models.models_cl import SimpleDense, SimpleDense_small, Identity, TransformerEncoder, transformer_args_standard
+from torchsummary import summary
 
 
 def train(args, model, device, train_label_loader, train_unlabel_loader, optimizer, m, epoch, tf_writer):
     model.train()
+    #Set frozen parts of the model to eval() (for correct handling of dropout, batchnorm, ...)
+    print(model[0])
+    model[0].eval()
 
-    
     bce = nn.BCELoss()
     #Change the strength of the adaptive uncertainty with a factor lambda_uncert
     lambda_uncert = 1.
@@ -158,6 +161,7 @@ def main():
     parser.add_argument('--runs', type=str, default='runs59')
     parser.add_argument('--latent-dim', type=int, default=48)
     parser.add_argument('--finetune', action='store_true')
+    parser.add_argument('--embedding-type', type=str, choices=('mlp', 'dino_transformer'), default='mlp')
 
     args = parser.parse_args()
     args.cuda = torch.cuda.is_available()
@@ -207,9 +211,9 @@ def main():
     elif args.dataset == 'background_with_signal_inference_latent':
         num_classes = 8
         args.labeled_num = 4
-        train_label_set = datasets.BACKGROUND_SIGNAL_INFERENCE_LATENT(root='./datasets',datatype='train_labeled', runs=args.runs, latent_dim=args.latent_dim, labeled_num=args.labeled_num, finetune=args.finetune, transform=TransformTwice(datasets.dict_transform['cifar_train_kyle_cvae']))
-        train_unlabel_set = datasets.BACKGROUND_SIGNAL_INFERENCE_LATENT(root='./datasets',datatype='train_unlabeled', runs=args.runs, latent_dim=args.latent_dim, labeled_num=args.labeled_num, finetune=args.finetune, transform=TransformTwice(datasets.dict_transform['cifar_train_kyle_cvae']))
-        test_set = datasets.BACKGROUND_SIGNAL_INFERENCE_LATENT(root='./datasets',datatype='test', runs=args.runs, latent_dim=args.latent_dim, labeled_num=args.labeled_num, finetune=args.finetune, transform=datasets.dict_transform['cifar_test_kyle_cvae'])
+        train_label_set = datasets.BACKGROUND_SIGNAL_INFERENCE_LATENT(root='./datasets',datatype='train_labeled', runs=args.runs, latent_dim=args.latent_dim, labeled_num=args.labeled_num, finetune=args.finetune, embedding_type=args.embedding_type, transform=TransformTwice(datasets.dict_transform['cifar_train_kyle_cvae']))
+        train_unlabel_set = datasets.BACKGROUND_SIGNAL_INFERENCE_LATENT(root='./datasets',datatype='train_unlabeled', runs=args.runs, latent_dim=args.latent_dim, labeled_num=args.labeled_num, finetune=args.finetune, embedding_type=args.embedding_type, transform=TransformTwice(datasets.dict_transform['cifar_train_kyle_cvae']))
+        test_set = datasets.BACKGROUND_SIGNAL_INFERENCE_LATENT(root='./datasets',datatype='test', runs=args.runs, latent_dim=args.latent_dim, labeled_num=args.labeled_num, finetune=args.finetune, embedding_type=args.embedding_type, transform=datasets.dict_transform['cifar_test_kyle_cvae'])
         
     else:
         warnings.warn('Dataset is not listed')
@@ -253,15 +257,27 @@ def main():
     #If finetune, add embedding model to finetune layers with ORCA objective
     if args.finetune:
         #Load pretrained weights
-        drive_path = f'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\'
-        if args.latent_dim == 48:
-            finetune = SimpleDense(args.latent_dim)
+        if args.embedding_type == 'mlp':
+            drive_path = f'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\'
+            if args.latent_dim == 48:
+                finetune = SimpleDense(args.latent_dim)
+            elif args.latent_dim == 6:
+                finetune = SimpleDense_small(args.latent_dim)
             finetune.load_state_dict(torch.load(drive_path+f'output/{args.runs}/vae.pth', map_location=torch.device(device)))
-        elif args.latent_dim == 6:
-            finetune = SimpleDense_small(args.latent_dim)
-            finetune.load_state_dict(torch.load(drive_path+f'output/{args.runs}/vae.pth', map_location=torch.device(device)))
-        
-        finetune.expander = nn.Identity()
+            finetune.expander = nn.Identity()
+        elif args.embedding_type == 'dino_transformer':
+            drive_path = f'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\dino\\'
+            finetune = TransformerEncoder(**transformer_args_standard)
+            finetune.load_state_dict(torch.load(drive_path+f'output/{args.runs}/_teacher_dino_transformer.pth', map_location=torch.device(device)))
+            finetune.dino_head = nn.Identity()
+            #Freeze the model except for the MLP
+            for param in finetune.parameters(): #First freeze everything
+                param.requires_grad = False
+            finetune.downsize.requires_grad_(True) #Unfreeze MLP part
+            finetune.eval() #Set the model to eval
+        else:
+            assert(False)
+
         model = nn.Sequential(finetune, model)
         
         #Freeze every layer except for the last one of the embedding backbone (finetune)
@@ -279,6 +295,7 @@ def main():
     for name, param in model.named_parameters():
         print(name)
         print(param)
+    summary(model)
  
     # print("Model's state_dict:")
     # for param_tensor in model.state_dict():
