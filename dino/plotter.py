@@ -8,9 +8,9 @@ from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA 
 from sklearn.metrics import roc_curve, auc
 import torch
-from models import SimpleDense, Identity, SimpleDense_small
+from transformer import TransformerEncoder, Identity
 from torch.utils.data import DataLoader, Dataset
-from train_with_signal import TorchCLDataset
+from train_dino import TorchCLDataset
 import torch.nn as nn
 import torch.nn.functional as F
 import seaborn as sns
@@ -18,6 +18,20 @@ import pandas as pd
 from PIL import Image
 import re
 
+#Architecture for transformer args
+transformer_args_standard = dict(
+        input_dim=3, 
+        model_dim=64, 
+        output_dim=64,
+        embed_dim=6,   #Only change embed_dim without describing new transformer architecture
+        n_heads=8, 
+        dim_feedforward=256, 
+        n_layers=4,
+        hidden_dim_dino_head=256,
+        bottleneck_dim_dino_head=64,
+        pos_encoding = True,
+        use_mask = False,
+    )
 #Define color and name dicts
 #Dictionary for the targets (colors)
 #Normal background (4 classes) + signal (4 classes)
@@ -40,7 +54,7 @@ dict_labels_names = {0: 'W-boson',
                      7: 'hToTauTau'
                              }
 #Split datasets (just copy/paste from split.py) or if legend covers everything just plot index and color (legend seperately)
-dict_labels_color = {0: 'teal', 
+""" dict_labels_color = {0: 'teal', 
                      1: 'lightseagreen', 
                      2: 'springgreen', 
                      3: 'darkgreen', 
@@ -74,7 +88,7 @@ dict_labels_names = {
                     13: '',
                     14: '',
                     15: '',
-                            }
+                            } """
 
 #t-SNE Plot of given embedding colored according to given labels
 def tSNE(embedding, labels, title, filename, namedir, dict_labels_color, dict_labels_names, rand_number=0, orca=False):
@@ -83,6 +97,7 @@ def tSNE(embedding, labels, title, filename, namedir, dict_labels_color, dict_la
     tsne = TSNE(n_components=2, random_state=rand_number)
     #Transform the embedding (N,6)
     print('Fitting the t-SNE')
+    print(np.shape(embedding))
     embedding_trans = tsne.fit_transform(embedding)
 
     #Dictionary for randomly generated anomaly labels by orca
@@ -308,8 +323,8 @@ def inference(model_name, input_data, input_labels, device=None):
     else: 
         device = device
     #Import model for embedding
-    model = SimpleDense(latent_dim=12).to(device)
-    #model = SimpleDense_small().to(device)
+    #model = SimpleDense().to(device)
+    model = TransformerEncoder(**transformer_args_standard).to(device)
     model.load_state_dict(torch.load(model_name, map_location=torch.device(device)))
     model.eval()
     #Get output with dataloader
@@ -318,7 +333,7 @@ def inference(model_name, input_data, input_labels, device=None):
         batch_size=1024,
         shuffle=False)
     with torch.no_grad():
-        output = np.concatenate([model.representation(data.to(device)).cpu().detach().numpy() for (data, label) in data_loader], axis=0)
+        output = np.concatenate([model.representation(data).cpu().detach().numpy() for (data, label) in data_loader], axis=0)
 
     return output
 
@@ -338,10 +353,10 @@ def classification_score(backbone_name, head_name, input_data, input_labels, dev
         backbone = Identity()
         embed_dim = 57
     else:
-        backbone = SimpleDense(latent_dim=12).to(device)
-        embed_dim = 12
-        #backbone = SimpleDense_small().to(device)
-        #embed_dim = 6
+        #backbone = SimpleDense().to(device)
+        #embed_dim = 48
+        backbone = TransformerEncoder(**transformer_args_standard).to(device)
+        embed_dim = transformer_args_standard["embed_dim"]
         backbone.load_state_dict(torch.load(backbone_name, map_location=torch.device(device)))
 
     head = nn.Linear(embed_dim, num_classes).to(device)
@@ -400,6 +415,7 @@ def main(runs):
     #Load embedding (test (train/val used for model optim))
     drive_path = 'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\'
     data = np.load(drive_path+'dataset_background_signal.npz')
+    drive_path = 'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\dino\\'
     #data = np.load(drive_path+'background_dataset_fullyleptonic_divided.npz')
     #embedding = np.load(drive_path+'output/runs35/embedding.npz')
     #embedded_test = embedding['embedding_test']
@@ -407,7 +423,9 @@ def main(runs):
     data_test = data['x_test']
     #labels_test = data['labels_test'][data['ix_test']]
     #data_test = data['x_test'][data['ix_test']]
-    embedded_test = inference(f'output/{runs}/vae.pth', data_test, labels_test)
+    embedded_test = inference(f'output/{runs}/_teacher_dino_transformer.pth', data_test.reshape(-1,19,3), labels_test)
+    print(embedded_test.shape)
+    embedded_test = embedded_test.reshape(-1,transformer_args_standard["embed_dim"])
 
     #Plot t-SNE
     def plot_tsne():
@@ -423,7 +441,7 @@ def main(runs):
     #Plot ROC curve (with AUC)
     def plot_roc():
         print("===Plotting ROC curve===")
-        predictions = classification_score(f'output/{runs}/vae.pth', f'output/{runs}/head.pth', data_test, labels_test, mode='roc')
+        predictions = classification_score(f'output/{runs}/_teacher_dino_transformer.pth', f'output/{runs}/head.pth', data_test, labels_test, mode='roc')
         predictions_noembedding = classification_score('NoEmbedding', 'output/NoEmbedding/head.pth', data_test, labels_test, mode='roc')
         labels = labels_test
         plot_ROC(predictions, labels, title='ROC curve with AUC for SimCLR embedding with supervised linear evaluation', filename='ROC curve with AUC for SimCLR embedding with supervised linear evaluation.pdf', folder=f'output/{runs}/plots/')
@@ -490,10 +508,10 @@ def main(runs):
             animate(images, type, runs=runs, method=method)
 
     plot_tsne()
-    plot_roc()
+    #plot_roc()
     plot_pca(dimension=2)
     plot_corner(embedded_test=embedded_test)
     #animate_method(data_test, labels_test, method='corner')
 
 if __name__ == '__main__':
-    main('runs68')
+    main('runs66')

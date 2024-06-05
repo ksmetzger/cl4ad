@@ -20,9 +20,9 @@ from torchsummary import summary
 def train(args, model, device, train_label_loader, train_unlabel_loader, optimizer, m, epoch, tf_writer):
     model.train()
     #Set frozen parts of the model to eval() (for correct handling of dropout, batchnorm, ...)
-    print(model[0])
-    model[0].eval()
-
+    if args.embedding_type == 'dino_transformer' and args.finetune == True:
+        model[0].eval()
+    #For 'mlp' could also just iterate and check with tensor.requires_grad == False and then set that layer to eval.
     bce = nn.BCELoss()
     #Change the strength of the adaptive uncertainty with a factor lambda_uncert
     lambda_uncert = 1.
@@ -161,7 +161,7 @@ def main():
     parser.add_argument('--runs', type=str, default='runs59')
     parser.add_argument('--latent-dim', type=int, default=48)
     parser.add_argument('--finetune', action='store_true')
-    parser.add_argument('--embedding-type', type=str, choices=('mlp', 'dino_transformer'), default='mlp')
+    parser.add_argument('--embedding-type', type=str, choices=('SimpleDense', 'SimpleDense_small', 'dino_transformer'), default='mlp')
 
     args = parser.parse_args()
     args.cuda = torch.cuda.is_available()
@@ -267,6 +267,7 @@ def main():
             finetune.expander = nn.Identity()
         elif args.embedding_type == 'dino_transformer':
             drive_path = f'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\dino\\'
+            #drive_path_lxplus = os.path.abspath('../dino/')
             finetune = TransformerEncoder(**transformer_args_standard)
             finetune.load_state_dict(torch.load(drive_path+f'output/{args.runs}/_teacher_dino_transformer.pth', map_location=torch.device(device)))
             finetune.dino_head = nn.Identity()

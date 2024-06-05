@@ -1,4 +1,5 @@
 import numpy as np
+import random
 import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -35,10 +36,16 @@ def get_arguments():
     parser.add_argument("--percent", default=1, type=int, choices=(1,10), help="If finetune, choose percentage of labeled train data the model is finetuned on.")
     parser.add_argument('--head-name', type=str, default='output/head.pth')
     parser.add_argument('--backbone-name', type=str, default='output/backbone_finetuned.pth')
+    parser.add_argument('--latent-dim', type=int, default=48)
     return parser
 
 
 def main():
+    #Set Seed
+    torch.manual_seed(0)
+    np.random.seed(0)
+    random.seed(0)
+
     #Get parser and device
     parser = get_arguments()
     args = parser.parse_args()
@@ -59,10 +66,13 @@ def main():
     #Dataset with signals and original divisions=[0.592,0.338,0.067,0.003]
     x_train, x_test, x_val, labels_train, labels_test, labels_val = load_data(args.dataset)
 
+    #Get transformations to apply in the training process
+    transform = augmentations.Transform([""])
+
     #Get pretrained model
     if args.arch == "SimpleDense":
-        embed_dim = 48
-        backbone = SimpleDense()
+        embed_dim = args.latent_dim
+        backbone = SimpleDense(latent_dim=args.latent_dim)
     elif args.arch == "DeepSets":
         embed_dim=48
         backbone = DeepSets()
@@ -143,9 +153,9 @@ def main():
 
         #Train
         for step, (data, target) in enumerate(train_data_loader, start = epoch*len(train_data_loader)):
-            target = target.long()
+            target = target.long().to(device)
             #output = head(backbone.representation(augmentations.naive_masking(data, device=device, rand_number=0))) #Train with the same augmentations as the contrastive objective
-            output = head(backbone.representation(data))
+            output = head(backbone.representation(transform(data)).to(device))
             loss = criterion(output, target.reshape(-1))
             optimizer.zero_grad()
             loss.backward()
@@ -168,7 +178,7 @@ def main():
         top5 = AverageMeter("Acc@5")
         with torch.no_grad():
             for data, target in val_data_loader:
-                output = head(backbone.representation(data))
+                output = head(backbone.representation(data.to(device)))
                 acc1, acc5, = accuracy(output, target, topk=(1,5))
                 top1.update(acc1[0].item(), data.size(0))
                 top5.update(acc5[0].item(), data.size(0))
@@ -199,7 +209,7 @@ def main():
         print(f"Classification head + finetuned backbone (with {args.percent}% labeled data) successfully saved!")
     
     #Print the penultimate performance also on the test dataset to confirm the changes made based on the accuracies of the validation dataset
-    top1, top5 = test_accuracy(test_data_loader, backbone, head)
+    top1, top5 = test_accuracy(test_data_loader, backbone, head, device)
     stats_test = dict(
         acc1_on_testset = top1,
         acc5_on_testset = top5,
@@ -225,7 +235,7 @@ def accuracy(output, target, topk=(1,)):
         return res
     
 #Confirm the accuracy on the test set
-def test_accuracy(dataloader, backbone, head):
+def test_accuracy(dataloader, backbone, head, device):
     #Evaluate
     backbone.eval()
     head.eval()
@@ -234,7 +244,7 @@ def test_accuracy(dataloader, backbone, head):
     top5 = AverageMeter("Acc@5")
     with torch.no_grad():
         for data, target in dataloader:
-            output = head(backbone.representation(data))
+            output = head(backbone.representation(data.to(device)))
             acc1, acc5, = accuracy(output, target, topk=(1,5))
             top1.update(acc1[0].item(), data.size(0))
             top5.update(acc5[0].item(), data.size(0))
@@ -281,8 +291,8 @@ class TorchCLDataset(Dataset):
         self.device = device
         self.mean = np.mean(features)
         self.std = np.std(features)
-        self.features = torch.from_numpy(features).to(dtype=torch.float32, device=self.device)
-        self.labels = torch.from_numpy(labels).to(dtype=torch.float32, device=self.device)
+        self.features = torch.from_numpy(features).to(dtype=torch.float32)
+        self.labels = torch.from_numpy(labels).to(dtype=torch.float32)
 
   def __len__(self):
         'Denotes the total number of samples'

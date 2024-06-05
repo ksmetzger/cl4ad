@@ -3,6 +3,7 @@ from argparse import ArgumentParser
 import matplotlib.pyplot as plt
 import os
 import time, datetime
+import random
 
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -22,6 +23,11 @@ def main(args):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print(f'Using {device}')
 
+    #Seed
+    np.random.seed(0)
+    torch.manual_seed(0)
+    random.seed(0)
+
     #Dataset with signals and original divisions=[0.592,0.338,0.067,0.003]
     dataset = np.load(args.dataset)
 
@@ -32,6 +38,8 @@ def main(args):
         feat_mean = np.mean(dataset['x_train'].reshape(-1,57), axis=0), 
         feat_std = np.std(dataset['x_train'].reshape(-1,57), axis=0),
     )
+    #Initialize transform
+    transform = augmentations.Transform(["naive_masking"])
     
     train_data_loader = DataLoader(
         TorchCLDataset(dataset['x_train'], dataset['labels_train'], device),
@@ -79,11 +87,13 @@ def main(args):
             # embed entire batch with first value of the batch repeated
             #first_val_repeated = val[0].repeat(args.batch_size, 1)
             #For DeepSets needs input shape (bsz, 19 , 3)
-            embedded_values_orig = model(val)
+            #embedded_values_orig = model(val)
+            embedded_values_orig = model(transform(val).to(device=device))
+            embedded_values_aug = model(transform(val).to(device=device))
             #embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
             #embedded_values_orig = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0))
             #embedded_values_aug = model(first_val_repeated)
-            embedded_values_aug = model(augmentations.corruption(val, **charac_trainset, rand_number=0, device=device, mode='gaussian'))
+            #embedded_values_aug = model(augmentations.corruption(val, **charac_trainset, rand_number=0, device=device, mode='gaussian'))
             #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
             #embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
             #embedded_values_aug = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42))
@@ -123,11 +133,13 @@ def main(args):
                     continue
 
                 #first_val_repeated = val[0].repeat(args.batch_size, 1)
-                embedded_values_orig = model(val)
+                embedded_values_orig = model(transform(val).to(device=device))
+                embedded_values_aug = model(transform(val).to(device=device))
+                #embedded_values_orig = model(val)
                 #embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
                 #embedded_values_aug = model(first_val_repeated)
                 #embedded_values_orig = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0))
-                embedded_values_aug = model(augmentations.corruption(val, **charac_trainset, rand_number=0, device=device, mode='gaussian'))
+                #embedded_values_aug = model(augmentations.corruption(val, **charac_trainset, rand_number=0, device=device, mode='gaussian'))
                 #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
                 #embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
                 #embedded_values_aug = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42))
@@ -167,7 +179,7 @@ def main(args):
             print(f'EPOCH {epoch}')
             temp_time= time.time()
             #Adjust the learning rate with Version 2 schedule (see OneNote)
-            lr = adjust_learning_rate(args, 10, epoch, optimizer, base_lr=0.2)
+            lr = adjust_learning_rate(args, 10, epoch, optimizer, base_lr=0.025)
             print("current Learning rate: ", lr)
             writer.add_scalar('Learning_rate', lr, epoch)
             # Gradient tracking
@@ -215,7 +227,7 @@ def main(args):
         shuffle=False)
         for loader, name in zip([train_data_loader, test_data_loader, val_data_loader],['train','test','val']):
             with torch.no_grad():
-                embedding = np.concatenate([model.representation(data).cpu().detach().numpy() for (data, label) in loader], axis=0)
+                embedding = np.concatenate([model.representation(data.to(device)).cpu().detach().numpy() for (data, label) in loader], axis=0)
                 embedding_dict[f"embedding_{name}"] = embedding
 
         np.savez(args.output_filename, **embedding_dict)
@@ -303,8 +315,8 @@ class TorchCLDataset(Dataset):
         self.mean = np.mean(features)
         self.std = np.std(features)
         #print(f"Mean: {self.mean} and std: {self.std}")
-        self.features = torch.from_numpy(features).to(dtype=torch.float32, device=self.device)
-        self.labels = torch.from_numpy(labels).to(dtype=torch.float32, device=self.device)
+        self.features = torch.from_numpy(features).to(dtype=torch.float32)
+        self.labels = torch.from_numpy(labels).to(dtype=torch.float32)
 
   def __len__(self):
         'Denotes the total number of samples'

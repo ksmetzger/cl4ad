@@ -75,7 +75,7 @@ def gaussian_resampling_pT(input_batch, device=None, rand_number=0, std_scale=0.
 
     return resampled_batch
 
-def naive_masking(input_batch, device=None, rand_number=0, p=0.5, mask_full_particle=False):
+def naive_masking(input_batch, device=None, rand_number=0, p=0.2, mask_full_particle=False):
     '''
     Applies the augmentation "naive_masking" to events in a batch (torch tensor) and outputs a torch tensor values randomly masked with probability p.
     Args:
@@ -86,8 +86,9 @@ def naive_masking(input_batch, device=None, rand_number=0, p=0.5, mask_full_part
     Returns:
         resampled_batch: (batch_size, 57) permutated output
     '''
-    np.random.seed(rand_number)
-    input_numpy = input_batch.cpu().detach().numpy().reshape(-1)
+    #np.random.seed(rand_number)
+    #input_numpy = input_batch.cpu().detach().numpy().reshape(-1)
+    input_numpy = input_batch.numpy().reshape(-1)
     #Randomly (with prob. p) set parts of the input to 0.0 (mask/crop)
     if mask_full_particle:
         mask = np.random.choice([True, False], size=int(input_numpy.shape[0]/3), replace=True, p=[p, 1-p]).reshape(-1,19)
@@ -95,7 +96,7 @@ def naive_masking(input_batch, device=None, rand_number=0, p=0.5, mask_full_part
     else:
         mask = np.random.choice([True, False], size=input_numpy.shape[0], replace=True, p=[p, 1-p])
         input_numpy[mask] = 0.0
-    resampled_batch = torch.from_numpy(input_numpy.reshape(-1,57)).to(dtype=torch.float32, device=device)
+    resampled_batch = torch.from_numpy(input_numpy.reshape(-1,57)).to(dtype=torch.float32)
     return resampled_batch
 
 def hardjet_masking(input_batch, device=None):
@@ -192,3 +193,16 @@ def corruption(input_batch, feat_low, feat_high, feat_mean, feat_std, mode=None,
 
     resampled_batch = torch.from_numpy(input_numpy.reshape(-1,57)).to(dtype=torch.float32, device=device)
     return resampled_batch
+
+class Transform():
+    def __init__(self, augmentations):
+        self.augmentations = []
+        if "naive_masking" in augmentations:
+            self.augmentations.append(naive_masking)
+
+    def __call__(self, input):
+        for augmentation in self.augmentations:
+            if augmentation == "":
+                return input
+            augmentation(input)
+        return input
