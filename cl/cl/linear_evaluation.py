@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import DataLoader, Dataset
 import losses
-from models import CVAE, SimpleDense, DeepSets, Identity, SimpleDense_small
+from models import CVAE, SimpleDense, DeepSets, Identity, SimpleDense_small, SimpleDense_JetClass
 import augmentations
 import argparse
 from pathlib import Path
@@ -63,11 +63,16 @@ def main():
     print(" ".join(sys.argv), file=stats_file)
     best_acc = argparse.Namespace(top1=0, top5=0)
 
+    if args.arch == "SimpleDense_JetClass":
+        feat_dim = 512
+    else:
+        feat_dim = 57
+
     #Dataset with signals and original divisions=[0.592,0.338,0.067,0.003]
-    x_train, x_test, x_val, labels_train, labels_test, labels_val = load_data(args.dataset)
+    x_train, x_test, x_val, labels_train, labels_test, labels_val = load_data(args.dataset, feat_dim)
 
     #Get transformations to apply in the training process
-    transform = augmentations.Transform([""])
+    transform = augmentations.Transform([], feat_dim)
 
     #Get pretrained model
     if args.arch == "SimpleDense":
@@ -77,16 +82,20 @@ def main():
         embed_dim=48
         backbone = DeepSets()
     elif args.arch == "NoEmbedding":
-        embed_dim = 57
+        embed_dim = 512
         backbone = Identity()
     elif args.arch == "SimpleDense_small":
         embed_dim = 6
         backbone = SimpleDense_small()
+    elif args.arch == "SimpleDense_JetClass":
+        embed_dim=48
+        backbone = SimpleDense_JetClass(latent_dim=embed_dim)
+
     else: warnings.warn("Model architecture is not listed")
 
     #Load state_dict of embedding and freeze the layers
     state_dict = torch.load(args.pretrained, map_location='cpu')
-    backbone.load_state_dict(state_dict=state_dict, strict=False)
+    backbone.load_state_dict(state_dict=state_dict)
     
     head = nn.Linear(embed_dim, args.num_classes)
     # head = nn.Sequential(
@@ -155,7 +164,7 @@ def main():
         for step, (data, target) in enumerate(train_data_loader, start = epoch*len(train_data_loader)):
             target = target.long().to(device)
             #output = head(backbone.representation(augmentations.naive_masking(data, device=device, rand_number=0))) #Train with the same augmentations as the contrastive objective
-            output = head(backbone.representation(transform(data)).to(device))
+            output = head(backbone.representation(transform(data).to(device)))
             loss = criterion(output, target.reshape(-1))
             optimizer.zero_grad()
             loss.backward()
@@ -178,6 +187,7 @@ def main():
         top5 = AverageMeter("Acc@5")
         with torch.no_grad():
             for data, target in val_data_loader:
+                target.to(device)
                 output = head(backbone.representation(data.to(device)))
                 acc1, acc5, = accuracy(output, target, topk=(1,5))
                 top1.update(acc1[0].item(), data.size(0))
@@ -277,11 +287,11 @@ class AverageMeter(object):
         fmtstr = "{name} {val" + self.fmt + "} ({avg" + self.fmt + "})"
         return fmtstr.format(**self.__dict__)
     
-def load_data(data_dir=''):
+def load_data(data_dir='', feat_dim=512):
     dataset = np.load(data_dir)
-    x_train, labels_train = dataset['x_train'], dataset['labels_train']
-    x_test, labels_test = dataset['x_test'], dataset['labels_test']
-    x_val, labels_val = dataset['x_val'], dataset['labels_val']
+    x_train, labels_train = dataset['x_train'].reshape(-1,feat_dim), dataset['labels_train'].reshape(-1)
+    x_test, labels_test = dataset['x_test'].reshape(-1,feat_dim), dataset['labels_test'].reshape(-1)
+    x_val, labels_val = dataset['x_val'].reshape(-1,feat_dim), dataset['labels_val'].reshape(-1)
     return x_train, x_test, x_val, labels_train, labels_test, labels_val
 
 class TorchCLDataset(Dataset):

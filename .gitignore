@@ -15,3 +15,5 @@ results
 latent
 output_tuner
 *.pth
+*.root
+*.sh

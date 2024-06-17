@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import time
 import datetime
 import os
+import random
 
 import torch
 import torch.nn as nn
@@ -24,21 +25,33 @@ def main(args):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print(f'Using {device}')
 
+    #Seed
+    np.random.seed(0)
+    torch.manual_seed(0)
+    random.seed(0)
+
     #Dataset with signals and original divisions=[0.592,0.338,0.067,0.003]
     dataset = np.load(os.path.join(os.getcwd(), args.dataset))
 
+    if args.type == 'JetClass':
+        feat_dim = 4
+        num_const = 128
+    else:
+        feat_dim = 3
+        num_const = 19
+
     train_data_loader = DataLoader(
-        TorchCLDataset(dataset['x_train'], dataset['labels_train'], device),
+        TorchCLDataset(dataset['x_train'].reshape(-1,num_const,feat_dim), dataset['labels_train'].reshape(-1), device),
         batch_size=args.batch_size,
         shuffle=True, drop_last=True)
 
     test_data_loader = DataLoader(
-        TorchCLDataset(dataset['x_test'], dataset['labels_test'], device),
+        TorchCLDataset(dataset['x_test'].reshape(-1,num_const,feat_dim), dataset['labels_test'].reshape(-1), device),
         batch_size=args.batch_size,
         shuffle=False)
 
     val_data_loader = DataLoader(
-        TorchCLDataset(dataset['x_val'], dataset['labels_val'], device),
+        TorchCLDataset(dataset['x_val'].reshape(-1,num_const,feat_dim), dataset['labels_val'].reshape(-1), device),
         batch_size=args.batch_size,
         shuffle=False, drop_last=True)
     
@@ -48,6 +61,19 @@ def main(args):
         model_dim=64, 
         output_dim=args.out_dim,
         embed_dim=12,   #Only change embed_dim without describing new transformer architecture
+        n_heads=8, 
+        dim_feedforward=256, 
+        n_layers=4,
+        hidden_dim_dino_head=256,
+        bottleneck_dim_dino_head=64,
+        pos_encoding = True,
+        use_mask = False,
+    )
+    transformer_args_jetclass = dict(
+        input_dim=4, 
+        model_dim=128, 
+        output_dim=args.out_dim,
+        embed_dim=64,   #Only change embed_dim without describing new transformer architecture
         n_heads=8, 
         dim_feedforward=256, 
         n_layers=4,
@@ -68,10 +94,17 @@ def main(args):
         pos_encoding=False,
         use_mask = False,
     )
-
-    #Build student and teacher models and move them to device
-    student = TransformerEncoder(**transformer_args_standard, norm_last_layer=args.norm_last_layer).to(device)
-    teacher = TransformerEncoder(**transformer_args_standard).to(device)
+    #Initialize transform
+    transform = augmentations.Transform(["naive_masking"], feat_dim=feat_dim, num_const=num_const)
+    
+    if args.type == 'JetClass':
+        #Build student and teacher models and move them to device
+        student = TransformerEncoder(**transformer_args_jetclass, norm_last_layer=args.norm_last_layer).to(device)
+        teacher = TransformerEncoder(**transformer_args_jetclass).to(device)
+    elif args.type == 'Delphes':
+        #Build student and teacher models and move them to device
+        student = TransformerEncoder(**transformer_args_standard, norm_last_layer=args.norm_last_layer).to(device)
+        teacher = TransformerEncoder(**transformer_args_standard).to(device)
     summary(student, input_size=(19,3))
     # teacher and student start with the same weights
     teacher.load_state_dict(student.state_dict())
@@ -127,10 +160,18 @@ def main(args):
                     param_group["weight_decay"] = wd_schedule[it]
 
             # teacher and student forward passes + compute dino loss
-            embedded_values_orig_student = student(augmentations.naive_masking(val, device=device, rand_number=0, p=0.5, mask_full_particle=False).reshape(-1,19,3))
-            embedded_values_aug_student = student(augmentations.naive_masking(val, device=device, rand_number=42, p=0.5, mask_full_particle=False).reshape(-1,19,3))
-            embedded_values_orig_teacher = teacher(augmentations.naive_masking(val, device=device, rand_number=0, p=0.5, mask_full_particle=False).reshape(-1,19,3))
-            embedded_values_aug_teacher = teacher(augmentations.naive_masking(val, device=device, rand_number=42, p=0.5, mask_full_particle=False).reshape(-1,19,3))
+            #embedded_values_orig_student = student(augmentations.naive_masking(val, device=device, rand_number=0, p=0.5, mask_full_particle=False).reshape(-1,19,3))
+            #embedded_values_aug_student = student(augmentations.naive_masking(val, device=device, rand_number=42, p=0.5, mask_full_particle=False).reshape(-1,19,3))
+            #embedded_values_orig_teacher = teacher(augmentations.naive_masking(val, device=device, rand_number=0, p=0.5, mask_full_particle=False).reshape(-1,19,3))
+            #embedded_values_aug_teacher = teacher(augmentations.naive_masking(val, device=device, rand_number=42, p=0.5, mask_full_particle=False).reshape(-1,19,3))
+            view1 = transform(val).to(device=device)
+            view2 = transform(val).to(device=device)
+            
+            embedded_values_orig_student = student(view1)
+            embedded_values_aug_student = student(view2)
+            embedded_values_orig_teacher = teacher(view1)
+            embedded_values_aug_teacher = teacher(view2)
+
             teacher_output = torch.cat([embedded_values_orig_teacher,embedded_values_aug_teacher],dim=0)
             student_output = torch.cat([embedded_values_orig_student,embedded_values_aug_student],dim=0)
             loss = criterion(student_output, teacher_output, epoch_index-1)
@@ -170,10 +211,17 @@ def main(args):
                 continue
 
             # teacher and student forward passes + compute dino loss
-            embedded_values_orig_student = student(augmentations.naive_masking(val, device=device, rand_number=0, p=0.5, mask_full_particle=False).reshape(-1,19,3))
-            embedded_values_aug_student = student(augmentations.naive_masking(val, device=device, rand_number=42, p=0.5, mask_full_particle=False).reshape(-1,19,3))
-            embedded_values_orig_teacher = teacher(augmentations.naive_masking(val, device=device, rand_number=0, p=0.5, mask_full_particle=False).reshape(-1,19,3))
-            embedded_values_aug_teacher = teacher(augmentations.naive_masking(val, device=device, rand_number=42, p=0.5, mask_full_particle=False).reshape(-1,19,3))
+            #embedded_values_orig_student = student(augmentations.naive_masking(val, device=device, rand_number=0, p=0.5, mask_full_particle=False).reshape(-1,19,3))
+            #embedded_values_aug_student = student(augmentations.naive_masking(val, device=device, rand_number=42, p=0.5, mask_full_particle=False).reshape(-1,19,3))
+            #embedded_values_orig_teacher = teacher(augmentations.naive_masking(val, device=device, rand_number=0, p=0.5, mask_full_particle=False).reshape(-1,19,3))
+            #embedded_values_aug_teacher = teacher(augmentations.naive_masking(val, device=device, rand_number=42, p=0.5, mask_full_particle=False).reshape(-1,19,3))
+            view1 = transform(val).to(device=device)
+            view2 = transform(val).to(device=device)
+            
+            embedded_values_orig_student = student(view1)
+            embedded_values_aug_student = student(view2)
+            embedded_values_orig_teacher = teacher(view1)
+            embedded_values_aug_teacher = teacher(view2)
             teacher_output = torch.cat([embedded_values_orig_teacher,embedded_values_aug_teacher],dim=0)
             student_output = torch.cat([embedded_values_orig_student,embedded_values_aug_student],dim=0)
             loss = criterion(student_output, teacher_output, epoch_index-1)
@@ -262,8 +310,8 @@ class TorchCLDataset(Dataset):
   def __init__(self, features, labels, device):
         'Initialization'
         self.device = device
-        self.features = torch.from_numpy(features).to(dtype=torch.float32, device=self.device)
-        self.labels = torch.from_numpy(labels).to(dtype=torch.float32, device=self.device)
+        self.features = torch.from_numpy(features).to(dtype=torch.float32)
+        self.labels = torch.from_numpy(labels).to(dtype=torch.float32)
 
   def __len__(self):
         'Denotes the total number of samples'
@@ -377,6 +425,6 @@ if __name__ == '__main__':
         In our experiments, we typically set this paramater to False with vit_small and True with vit_base.""")
     # parser.add_argument('--use_mask', default=True, type=utils.bool_flag,
     #     help="""Whether or not to mask the zero padded input (zero pT means no particle present) in the transformer encoder.""")
-    
+    parser.add_argument('--type', choices=('Delphes', 'JetClass'))
     args = parser.parse_args()
     main(args)

@@ -11,7 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torchsummary import summary
 
 import losses
-from models import CVAE, SimpleDense, DeepSets, SimpleDense_small
+from models import CVAE, SimpleDense, DeepSets, SimpleDense_small, SimpleDense_JetClass
 import augmentations
 import math
 
@@ -31,38 +31,46 @@ def main(args):
     #Dataset with signals and original divisions=[0.592,0.338,0.067,0.003]
     dataset = np.load(args.dataset)
 
+    feat_dim = 57
+    if args.type == 'JetClass':
+        feat_dim = 512
+
     #For corruption augm. get min, max, mean, std values of all the features in the training dataset
     charac_trainset = dict(
-        feat_low = np.min(dataset['x_train'].reshape(-1,57), axis=0), 
-        feat_high = np.max(dataset['x_train'].reshape(-1,57), axis=0),
-        feat_mean = np.mean(dataset['x_train'].reshape(-1,57), axis=0), 
-        feat_std = np.std(dataset['x_train'].reshape(-1,57), axis=0),
+        feat_low = np.min(dataset['x_train'].reshape(-1,feat_dim), axis=0), 
+        feat_high = np.max(dataset['x_train'].reshape(-1,feat_dim), axis=0),
+        feat_mean = np.mean(dataset['x_train'].reshape(-1,feat_dim), axis=0), 
+        feat_std = np.std(dataset['x_train'].reshape(-1, feat_dim), axis=0),
     )
-    #Initialize transform
-    transform = augmentations.Transform(["naive_masking"])
+    #Initialize transform (empty list: None)
+    transform = augmentations.Transform(["naive_masking"], feat_dim)
     
     train_data_loader = DataLoader(
-        TorchCLDataset(dataset['x_train'], dataset['labels_train'], device),
+        TorchCLDataset(dataset['x_train'].reshape(-1,feat_dim), dataset['labels_train'].reshape(-1), device),
         batch_size=args.batch_size,
         shuffle=True)
 
     test_data_loader = DataLoader(
-        TorchCLDataset(dataset['x_test'], dataset['labels_test'], device),
+        TorchCLDataset(dataset['x_test'].reshape(-1,feat_dim), dataset['labels_test'].reshape(-1), device),
         batch_size=args.batch_size,
         shuffle=False)
 
     val_data_loader = DataLoader(
-        TorchCLDataset(dataset['x_val'], dataset['labels_val'], device),
+        TorchCLDataset(dataset['x_val'].reshape(-1,feat_dim), dataset['labels_val'].reshape(-1), device),
         batch_size=args.batch_size,
         shuffle=False)
 
-    model = SimpleDense(args.latent_dim).to(device)
-    #model = SimpleDense_small().to(device)
-    summary(model, input_size=(57,))
+    if args.type == 'JetClass':
+        model = SimpleDense_JetClass(args.latent_dim).to(device)
+        summary(model, input_size=(512,))
+    else:
+        model = SimpleDense(args.latent_dim).to(device)
+        #model = SimpleDense_small().to(device)
+        summary(model, input_size=(57,))
 
     # criterion = losses.SimCLRLoss()
     #criterion = losses.VICRegLoss()
-    criterion = losses.SimCLRloss_nolabels_fast(temperature=args.loss_temp, base_temperature=args.loss_temp)
+    criterion = losses.SimCLRloss_nolabels_fast(temperature=args.loss_temp, base_temperature=args.loss_temp, contrast_mode='one')
     #Standard schedule
     """ optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-3) #Adams pytorch impl. of weight decay is equiv. to the L2 penalty.
     scheduler_1 = torch.optim.lr_scheduler.ConstantLR(optimizer, total_iters=5)
@@ -392,6 +400,7 @@ if __name__ == '__main__':
     parser.add_argument('--mix-in-anomalies', action='store_true')
     parser.add_argument('--latent-dim', type=int, default=48)
     parser.add_argument('--train', action='store_true')
+    parser.add_argument('--type', choices=('Delphes', 'JetClass'))
 
     args = parser.parse_args()
     main(args)

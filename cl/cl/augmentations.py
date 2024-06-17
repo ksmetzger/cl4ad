@@ -27,7 +27,7 @@ def permutation(input_batch, device=None, rand_number=0, same_particle=False):
 
     return permutated_batch
 
-def rot_around_beamline(input_batch, device=None, rand_number=0):
+def rot_around_beamline(input_batch, device=None, rand_number=0, feat_dim=57):
     '''
     Applies the augmentation "rotation around beamline" to events in a batch (torch tensor) and outputs a permutated torch tensor
     Rotates each event in the batch w/ structure: MET, 4x electron, 4x muon, 10x jet around a random angle.
@@ -38,9 +38,12 @@ def rot_around_beamline(input_batch, device=None, rand_number=0):
     Returns:
         permutated_batch: (batch_size, 57) permutated output
     '''
-    input_numpy = input_batch.cpu().detach().numpy().reshape(-1,19,3)
+    if feat_dim == 57:
+        input_numpy = input_batch.numpy().reshape(-1,19,3)
+    elif feat_dim == 512:
+        input_numpy = input_batch.numpy().reshape(-1,128,4)
     #Rotate the whole thing around the beamline (phi) at angle
-    np.random.seed(rand_number)
+    #np.random.seed(rand_number)
     #Iterate through the batch
     for x in input_numpy:
         #Angles are stored from [-pi,pi]
@@ -48,11 +51,11 @@ def rot_around_beamline(input_batch, device=None, rand_number=0):
         x[:,2] = (((x[:,2]+np.pi) + angle)%(2*np.pi))-np.pi
 
     #Return a torch tensor on the given device and correct shape (-1,57)
-    rotated_batch = torch.from_numpy(input_numpy.reshape(-1,57)).to(dtype=torch.float32, device=device)
+    rotated_batch = torch.from_numpy(input_numpy.reshape(-1,feat_dim)).to(dtype=torch.float32)
 
     return rotated_batch
 
-def gaussian_resampling_pT(input_batch, device=None, rand_number=0, std_scale=0.1):
+def gaussian_resampling_pT(input_batch, device=None, rand_number=0, std_scale=0.1, feat_dim=57):
     '''
     Applies the augmentation "gaussian resampling of pT" to events in a batch (torch tensor) and outputs a torch tensor with pT values rescaled within std.
     Resample pT of constituents with mu=pT, std=pT*std_scale in the DELPHES dataset w/ structure: MET, 4x electron, 4x muon, 10x jet.
@@ -64,18 +67,21 @@ def gaussian_resampling_pT(input_batch, device=None, rand_number=0, std_scale=0.
     Returns:
         resampled_batch: (batch_size, 57) permutated output
     '''
-    input_numpy = input_batch.cpu().detach().numpy().reshape(-1,19,3)
+    if feat_dim == 57:
+        input_numpy = input_batch.numpy().reshape(-1,19,3)
+    elif feat_dim == 512:
+        input_numpy = input_batch.numpy().reshape(-1,128,4)
     #Guassian resample the pT's of each constituent with mu=pT and std = pT * std_scale
-    np.random.seed(rand_number) #not sure if I should seed
+    #np.random.seed(rand_number) #not sure if I should seed
     for x in input_numpy:
         x[:,0] = np.random.normal(loc=x[:,0], scale=np.absolute(x[:,0])*std_scale)
 
     #Return a torch tensor on the given device and correct shape (-1,57)
-    resampled_batch = torch.from_numpy(input_numpy.reshape(-1,57)).to(dtype=torch.float32, device=device)
+    resampled_batch = torch.from_numpy(input_numpy.reshape(-1,feat_dim)).to(dtype=torch.float32)
 
     return resampled_batch
 
-def naive_masking(input_batch, device=None, rand_number=0, p=0.2, mask_full_particle=False):
+def naive_masking(input_batch, device=None, rand_number=0, p=0.1, mask_full_particle=False, feat_dim=57):
     '''
     Applies the augmentation "naive_masking" to events in a batch (torch tensor) and outputs a torch tensor values randomly masked with probability p.
     Args:
@@ -91,12 +97,16 @@ def naive_masking(input_batch, device=None, rand_number=0, p=0.2, mask_full_part
     input_numpy = input_batch.numpy().reshape(-1)
     #Randomly (with prob. p) set parts of the input to 0.0 (mask/crop)
     if mask_full_particle:
-        mask = np.random.choice([True, False], size=int(input_numpy.shape[0]/3), replace=True, p=[p, 1-p]).reshape(-1,19)
-        input_numpy.reshape(-1,19,3)[mask] = 0.0
+        if feat_dim == 57:
+            mask = np.random.choice([True, False], size=int(input_numpy.shape[0]/3), replace=True, p=[p, 1-p]).reshape(-1,19)
+            input_numpy.reshape(-1,19,3)[mask] = 0.0
+        elif feat_dim == 512:
+            mask = np.random.choice([True, False], size=int(input_numpy.shape[0]/4), replace=True, p=[p, 1-p]).reshape(-1,128)
+            input_numpy.reshape(-1,128,4)[mask] = 0.0
     else:
         mask = np.random.choice([True, False], size=input_numpy.shape[0], replace=True, p=[p, 1-p])
         input_numpy[mask] = 0.0
-    resampled_batch = torch.from_numpy(input_numpy.reshape(-1,57)).to(dtype=torch.float32)
+    resampled_batch = torch.from_numpy(input_numpy.reshape(-1,feat_dim)).to(dtype=torch.float32)
     return resampled_batch
 
 def hardjet_masking(input_batch, device=None):
@@ -195,14 +205,22 @@ def corruption(input_batch, feat_low, feat_high, feat_mean, feat_std, mode=None,
     return resampled_batch
 
 class Transform():
-    def __init__(self, augmentations):
+    def __init__(self, augmentations, feat_dim):
         self.augmentations = []
-        if "naive_masking" in augmentations:
-            self.augmentations.append(naive_masking)
+        self.feat_dim = feat_dim
+        print(f"Using the following augments:")
+        for augment in augmentations:
+            print(f"{augment}")
+            if augment == "naive_masking":
+                self.augmentations.append(naive_masking)
+            elif augment == "gaussian_resampling_pT":
+                self.augmentations.append(gaussian_resampling_pT)
+            elif augment == "rot_around_beamline":
+                self.augmentations.append(rot_around_beamline)
+            else:
+                assert False
 
     def __call__(self, input):
         for augmentation in self.augmentations:
-            if augmentation == "":
-                return input
-            augmentation(input)
+            augmentation(input, feat_dim=self.feat_dim)
         return input

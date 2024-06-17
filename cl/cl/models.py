@@ -131,6 +131,41 @@ class SimpleDense_small(torch.nn.Module):
         z = self.expander(y)
         return z
     
+class SimpleDense_JetClass(torch.nn.Module):
+    def __init__(self, latent_dim = 48, expanded_dim = 128):
+        super(SimpleDense_JetClass, self).__init__()
+        self.latent_dim = latent_dim
+        self.expanded_dim = expanded_dim
+
+        self.encoder = torch.nn.Sequential(
+            nn.Linear(512,256),
+            nn.BatchNorm1d(256),
+            nn.LeakyReLU(),
+            nn.Linear(256,128),
+            nn.BatchNorm1d(128),
+            nn.LeakyReLU(),
+            nn.Linear(128,64),
+            nn.BatchNorm1d(64),
+            nn.LeakyReLU(),
+            nn.Linear(64,self.latent_dim),
+            nn.BatchNorm1d(self.latent_dim),
+            nn.LeakyReLU(),
+        )
+        self.expander = torch.nn.Sequential(
+            nn.Linear(self.latent_dim,64),
+            nn.BatchNorm1d(64),
+            nn.LeakyReLU(),
+            nn.Linear(64,self.expanded_dim),
+            nn.BatchNorm1d(self.expanded_dim),
+        )
+    def representation(self, x):
+        y = self.encoder(x)
+        return y
+    
+    def forward(self, x):
+        y = self.representation(x)
+        z = self.expander(y)
+        return z
 
 #similar implementation to https://github.com/fastmachinelearning/l1-jet-id/blob/main/deepsets/deepsets/deepsets.py
 class DeepSets(torch.nn.Module):

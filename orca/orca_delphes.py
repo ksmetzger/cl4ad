@@ -99,7 +99,7 @@ def train(args, model, device, train_label_loader, train_unlabel_loader, optimiz
     #Print the total loss after each epoch
     print("Loss: ", -entropy_losses.avg + ce_losses.avg + bce_losses.avg)
 
-def test(args, model, labeled_num, device, test_loader, epoch, tf_writer):
+def test(args, model, labeled_num, device, test_loader, epoch, tf_writer, num_classes):
     model.eval()
     preds = np.array([])
     targets = np.array([])
@@ -107,7 +107,7 @@ def test(args, model, labeled_num, device, test_loader, epoch, tf_writer):
     
     
     #Initialize array to store the softmax prob output (8,)
-    prob_softmax = np.empty((0,8))
+    prob_softmax = np.empty((0,num_classes))
     with torch.no_grad():
         for batch_idx, (x, label) in enumerate(test_loader):
             x, label = x.to(device), label.to(device)
@@ -161,7 +161,7 @@ def main():
     parser.add_argument('--runs', type=str, default='runs59')
     parser.add_argument('--latent-dim', type=int, default=48)
     parser.add_argument('--finetune', action='store_true')
-    parser.add_argument('--embedding-type', type=str, choices=('SimpleDense', 'SimpleDense_small', 'dino_transformer'), default='mlp')
+    parser.add_argument('--embedding-type', type=str, choices=('SimpleDense', 'SimpleDense_small', 'dino_transformer'), default='SimpleDense')
 
     args = parser.parse_args()
     args.cuda = torch.cuda.is_available()
@@ -214,7 +214,12 @@ def main():
         train_label_set = datasets.BACKGROUND_SIGNAL_INFERENCE_LATENT(root='./datasets',datatype='train_labeled', runs=args.runs, latent_dim=args.latent_dim, labeled_num=args.labeled_num, finetune=args.finetune, embedding_type=args.embedding_type, transform=TransformTwice(datasets.dict_transform['cifar_train_kyle_cvae']))
         train_unlabel_set = datasets.BACKGROUND_SIGNAL_INFERENCE_LATENT(root='./datasets',datatype='train_unlabeled', runs=args.runs, latent_dim=args.latent_dim, labeled_num=args.labeled_num, finetune=args.finetune, embedding_type=args.embedding_type, transform=TransformTwice(datasets.dict_transform['cifar_train_kyle_cvae']))
         test_set = datasets.BACKGROUND_SIGNAL_INFERENCE_LATENT(root='./datasets',datatype='test', runs=args.runs, latent_dim=args.latent_dim, labeled_num=args.labeled_num, finetune=args.finetune, embedding_type=args.embedding_type, transform=datasets.dict_transform['cifar_test_kyle_cvae'])
-        
+    elif args.dataset == 'background_with_signal_inference_latent_jetclass':
+        num_classes = 10
+        args.labeled_num = 5
+        train_label_set = datasets.BACKGROUND_SIGNAL_INFERENCE_LATENT_JETCLASS(root='./datasets',datatype='train_labeled', runs=args.runs, latent_dim=args.latent_dim, labeled_num=args.labeled_num, finetune=args.finetune, embedding_type=args.embedding_type, transform=TransformTwice(datasets.dict_transform['cifar_train_kyle_cvae']))
+        train_unlabel_set = datasets.BACKGROUND_SIGNAL_INFERENCE_LATENT_JETCLASS(root='./datasets',datatype='train_unlabeled', runs=args.runs, latent_dim=args.latent_dim, labeled_num=args.labeled_num, finetune=args.finetune, embedding_type=args.embedding_type, transform=TransformTwice(datasets.dict_transform['cifar_train_kyle_cvae']))
+        test_set = datasets.BACKGROUND_SIGNAL_INFERENCE_LATENT_JETCLASS(root='./datasets',datatype='test', runs=args.runs, latent_dim=args.latent_dim, labeled_num=args.labeled_num, finetune=args.finetune, embedding_type=args.embedding_type, transform=datasets.dict_transform['cifar_test_kyle_cvae'])
     else:
         warnings.warn('Dataset is not listed')
         return
@@ -251,13 +256,18 @@ def main():
             #model = models.CVAE_latent(num_classes=num_classes)
         elif args.size == 'large':
             model = models.Dense_latent_large(num_classes=num_classes, latent_dim=args.latent_dim)
+    elif args.dataset == 'background_with_signal_inference_latent_jetclass':
+        if args.size == 'simple':
+            model = models.Dense_latent_simple(num_classes=num_classes, latent_dim=args.latent_dim)
+        elif args.size == 'large':
+            model = models.Dense_latent_large(num_classes=num_classes, latent_dim=args.latent_dim)
     else:
         warnings.warn('Model is not listed')
         return
     #If finetune, add embedding model to finetune layers with ORCA objective
     if args.finetune:
         #Load pretrained weights
-        if args.embedding_type == 'mlp':
+        if args.embedding_type == 'SimpleDense' or args.embedding_type == 'SimpleDense_small':
             drive_path = f'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\'
             if args.latent_dim == 48:
                 finetune = SimpleDense(args.latent_dim)
@@ -312,10 +322,10 @@ def main():
     
     #Initialize arrays for saving output
     pred_conf_output = np.empty((int((args.epochs/5)+1),3, unlabeled_len)) #Save the class predictions and confidence (every 5th epoch)
-    prob_softmax_output = np.empty((int((args.epochs/5)+1),unlabeled_len,8)) #Save the softmax prob (every 5th epoch)
+    prob_softmax_output = np.empty((int((args.epochs/5)+1),unlabeled_len, num_classes)) #Save the softmax prob (every 5th epoch)
     count = 0
     for epoch in range(args.epochs):
-        mean_uncert, targets_preds_conf, prob_softmax = test(args, model, args.labeled_num, device, test_loader, epoch, tf_writer) #removed , latent for memory reasons 
+        mean_uncert, targets_preds_conf, prob_softmax = test(args, model, args.labeled_num, device, test_loader, epoch, tf_writer, num_classes) #removed , latent for memory reasons 
         print("Mean uncertainty m: ", mean_uncert)
         train(args, model, device, train_label_loader, train_unlabel_loader, optimizer, mean_uncert, epoch, tf_writer)
         print('Epoch: ',epoch)

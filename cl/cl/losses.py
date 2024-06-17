@@ -152,7 +152,7 @@ class SimCLRloss_nolabels_fast(torch.nn.Module):
     see https://arxiv.org/pdf/2002.05709.pdf
     Implementation from https://github.com/HobbitLong/SupContrast/blob/master/losses.py.
     """
-    def __init__(self, temperature=0.07,contrast_mode='one',
+    def __init__(self, temperature=0.07,contrast_mode='all',
                  base_temperature=0.07):
         super(SimCLRloss_nolabels_fast, self).__init__()
         self.temperature = temperature
