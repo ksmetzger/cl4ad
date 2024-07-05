@@ -412,3 +412,16 @@ transformer_args_standard = dict(
         pos_encoding = True,
         use_mask = False,
     )
+transformer_args_jetclass = dict(
+        input_dim=4, 
+        model_dim=128, 
+        output_dim=64,
+        embed_dim=64,   #Only change embed_dim without describing new transformer architecture
+        n_heads=8, 
+        dim_feedforward=256, 
+        n_layers=4,
+        hidden_dim_dino_head=256,
+        bottleneck_dim_dino_head=64,
+        pos_encoding = True,
+        use_mask = False,
+    )

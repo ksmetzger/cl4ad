@@ -88,8 +88,8 @@ def main():
         embed_dim = 6
         backbone = SimpleDense_small()
     elif args.arch == "SimpleDense_JetClass":
-        embed_dim=48
-        backbone = SimpleDense_JetClass(latent_dim=embed_dim)
+        embed_dim= args.latent_dim
+        backbone = SimpleDense_JetClass(latent_dim=args.latent_dim)
 
     else: warnings.warn("Model architecture is not listed")
 
@@ -187,7 +187,7 @@ def main():
         top5 = AverageMeter("Acc@5")
         with torch.no_grad():
             for data, target in val_data_loader:
-                target.to(device)
+                target = target.to(device)
                 output = head(backbone.representation(data.to(device)))
                 acc1, acc5, = accuracy(output, target, topk=(1,5))
                 top1.update(acc1[0].item(), data.size(0))

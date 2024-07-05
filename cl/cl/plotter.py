@@ -8,7 +8,7 @@ from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA 
 from sklearn.metrics import roc_curve, auc
 import torch
-from models import SimpleDense, Identity, SimpleDense_small
+from models import SimpleDense, Identity, SimpleDense_small, SimpleDense_JetClass
 from torch.utils.data import DataLoader, Dataset
 from train_with_signal import TorchCLDataset
 import torch.nn as nn
@@ -75,6 +75,31 @@ dict_labels_names = {
                     14: '',
                     15: '',
                             }
+#Dicts for JetClass
+dict_labels_color = {0: 'teal', 
+                     1: 'lightseagreen', 
+                     2: 'springgreen', 
+                     3: 'darkgreen', 
+                     4: 'lightcoral', 
+                     5: 'maroon', 
+                     6: 'fuchsia', 
+                     7: 'indigo',
+                     8: 'orange',
+                     9: 'brown'
+                             }
+dict_labels_names = {0: 'QCD-background', 
+                     1: 'hToBB', 
+                     2: 'hToCC', 
+                     3: 'hToGG', 
+                     4: 'hTo4q', 
+                     5: 'hTolvqq', 
+                     6: 'tTobqq', 
+                     7: 'tToblv',
+                     8: 'WToqq',
+                     9: 'ZToqq',
+                             }
+
+
 
 #t-SNE Plot of given embedding colored according to given labels
 def tSNE(embedding, labels, title, filename, namedir, dict_labels_color, dict_labels_names, rand_number=0, orca=False):
@@ -249,9 +274,11 @@ def corner_plot(embedding, labels, title, filename, dict_labels_color, dict_labe
     anomaly_df = pd.DataFrame()
     #Background part
     if background=='one':
-        mask = (labels < 4).reshape(-1)
+        #mask = (labels < 4).reshape(-1)
+        mask = (labels < 1).reshape(-1)
         background_embed = embedding[mask]
-        background_df = pd.concat([background_df, pd.DataFrame(sns_dict(background_embed, "SM-background"))])
+        #background_df = pd.concat([background_df, pd.DataFrame(sns_dict(background_embed, "SM-background"))])
+        background_df = pd.concat([background_df, pd.DataFrame(sns_dict(background_embed, "QCD-background"))])
     elif background == 'detail':
         for i in range(4): #Iterate through background classes
             mask = (labels == i).reshape(-1)
@@ -280,7 +307,8 @@ def corner_plot(embedding, labels, title, filename, dict_labels_color, dict_labe
     color_dict = {}
     for i in dict_labels_color.keys():
         color_dict[dict_labels_names[i]] = dict_labels_color[i]
-    color_dict["SM-background"] = 'grey'
+    #color_dict["SM-background"] = 'grey'
+    color_dict["QCD-background"] = 'grey'
 
     #Create cornerplot (pairplot)
     #corner = sns.pairplot(df, hue="label", kind='kde', palette=color_dict, corner=True)
@@ -308,8 +336,9 @@ def inference(model_name, input_data, input_labels, device=None):
     else: 
         device = device
     #Import model for embedding
-    model = SimpleDense(latent_dim=12).to(device)
+    #model = SimpleDense(latent_dim=12).to(device)
     #model = SimpleDense_small().to(device)
+    model = SimpleDense_JetClass(latent_dim=6).to(device)
     model.load_state_dict(torch.load(model_name, map_location=torch.device(device)))
     model.eval()
     #Get output with dataloader
@@ -323,7 +352,7 @@ def inference(model_name, input_data, input_labels, device=None):
     return output
 
 #Define classification score
-def classification_score(backbone_name, head_name, input_data, input_labels, device=None, embed_dim=48, num_classes=8, mode='roc'):
+def classification_score(backbone_name, head_name, input_data, input_labels, device=None, embed_dim=48, num_classes=10, mode='roc'):
     '''
     Get the classification scores (softmax) needed for roc_curvers, ...
     If  mode = 'roc' output only (softmax) probabilities for  background (class 0) vs anomaly (class 1)
@@ -336,10 +365,13 @@ def classification_score(backbone_name, head_name, input_data, input_labels, dev
     #Import model for embedding
     if backbone_name == 'NoEmbedding':
         backbone = Identity()
-        embed_dim = 57
+        #embed_dim = 57
+        embed_dim=512
     else:
-        backbone = SimpleDense(latent_dim=12).to(device)
-        embed_dim = 12
+        #backbone = SimpleDense(latent_dim=12).to(device)
+        #embed_dim = 12
+        backbone = SimpleDense_JetClass(latent_dim=6)
+        embed_dim = 6
         #backbone = SimpleDense_small().to(device)
         #embed_dim = 6
         backbone.load_state_dict(torch.load(backbone_name, map_location=torch.device(device)))
@@ -399,12 +431,13 @@ def main(runs):
 
     #Load embedding (test (train/val used for model optim))
     drive_path = 'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\'
-    data = np.load(drive_path+'dataset_background_signal.npz')
+    #data = np.load(drive_path+'dataset_background_signal.npz')
+    data = np.load(drive_path+'jetclass_dataset/JetClass_background_signal_reshaped.npz')
     #data = np.load(drive_path+'background_dataset_fullyleptonic_divided.npz')
     #embedding = np.load(drive_path+'output/runs35/embedding.npz')
     #embedded_test = embedding['embedding_test']
     labels_test = data['labels_test']
-    data_test = data['x_test']
+    data_test = data['x_test'].reshape(-1,512)
     #labels_test = data['labels_test'][data['ix_test']]
     #data_test = data['x_test'][data['ix_test']]
     embedded_test = inference(f'output/{runs}/vae.pth', data_test, labels_test)
@@ -424,7 +457,7 @@ def main(runs):
     def plot_roc():
         print("===Plotting ROC curve===")
         predictions = classification_score(f'output/{runs}/vae.pth', f'output/{runs}/head.pth', data_test, labels_test, mode='roc')
-        predictions_noembedding = classification_score('NoEmbedding', 'output/NoEmbedding/head.pth', data_test, labels_test, mode='roc')
+        predictions_noembedding = classification_score('NoEmbedding', 'output/NoEmbeddingJetClass/head.pth', data_test, labels_test, mode='roc')
         labels = labels_test
         plot_ROC(predictions, labels, title='ROC curve with AUC for SimCLR embedding with supervised linear evaluation', filename='ROC curve with AUC for SimCLR embedding with supervised linear evaluation.pdf', folder=f'output/{runs}/plots/')
         plot_ROC(predictions_noembedding, labels, title='ROC curve with AUC for No Embedding with supervised linear evaluation', filename='ROC curve with AUC for No Embedding with supervised linear evaluation.pdf', folder=f'output/{runs}/plots/')
@@ -446,7 +479,7 @@ def main(runs):
         print("===Plotting Cornerplot===")
         print(f"with {np.sum(idx)} datapoints")
         labels = labels_test
-        corner_plot(embedded_test[idx], labels[idx], f'Corner plot of (3D-PCA) of the embedding with anomaly leptoquark {iteration}', 
+        """ corner_plot(embedded_test[idx], labels[idx], f'Corner plot of (3D-PCA) of the embedding with anomaly leptoquark {iteration}', 
                     f'Corner plot of (3D-PCA) of the embedding with anomaly leptoquark{iteration}.png',dict_labels_color, dict_labels_names, pca=False, normalize=True, background='one', anomalies=['leptoquark'], folder=f'output/{runs}/plots/{subfolder}')
         corner_plot(embedded_test[idx], labels[idx], f'Corner plot of (3D-PCA) of the embedding with anomaly ato4l {iteration}', 
                     f'Corner plot of (3D-PCA) of the embedding with anomaly ato4l{iteration}.png',dict_labels_color, dict_labels_names, pca=False, normalize=True, background='one', anomalies=['ato4l'], folder=f'output/{runs}/plots/{subfolder}')
@@ -454,7 +487,13 @@ def main(runs):
                     f'Corner plot of (3D-PCA) of the embedding with anomaly hChToTauNu{iteration}.png',dict_labels_color, dict_labels_names, pca=False, normalize=True, background='one', anomalies=['hChToTauNu'], folder=f'output/{runs}/plots/{subfolder}')
         corner_plot(embedded_test[idx], labels[idx], f'Corner plot of (3D-PCA) of the embedding with anomaly hToTauTau {iteration}', 
                     f'Corner plot of (3D-PCA) of the embedding with anomaly hToTauTau{iteration}.png',dict_labels_color, dict_labels_names, pca=False, normalize=True, background='one', anomalies=['hToTauTau'], folder=f'output/{runs}/plots/{subfolder}')
-        
+         """
+        for i, key in enumerate(dict_labels_names.values()):
+            print(f"Corner plot for anomaly {key}")
+            if i != 0:
+                corner_plot(embedded_test[idx], labels[idx], f'Corner plot of (3D-PCA) of the embedding with anomaly {key}{iteration}', 
+                            f'Corner plot of (3D-PCA) of the embedding with anomaly {key}{iteration}.png',dict_labels_color, dict_labels_names, pca=False, normalize=True, background='one', anomalies=[key], folder=f'output/{runs}/plots/{subfolder}')
+
     def animate_method(data_test, labels_test, method='corner'):
         """
             methods implemented so far: 'corner', ...
@@ -489,11 +528,11 @@ def main(runs):
             #Make the gif and save it
             animate(images, type, runs=runs, method=method)
 
-    plot_tsne()
-    plot_roc()
-    plot_pca(dimension=2)
+    #plot_tsne()
+    #plot_roc()
+    #plot_pca(dimension=2)
     plot_corner(embedded_test=embedded_test)
     #animate_method(data_test, labels_test, method='corner')
 
 if __name__ == '__main__':
-    main('runs68')
+    main('runs85')

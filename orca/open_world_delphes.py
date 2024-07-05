@@ -19,7 +19,7 @@ from sklearn.utils import shuffle
 import warnings
 import torch
 import augmentations
-from models.models_cl import SimpleDense, SimpleDense_small, TransformerEncoder, transformer_args_standard, SimpleDense_JetClass
+from models.models_cl import SimpleDense, SimpleDense_small, TransformerEncoder, transformer_args_standard, SimpleDense_JetClass, transformer_args_jetclass
 
 class BACKGROUND(Dataset):
 
@@ -523,7 +523,7 @@ class BACKGROUND_SIGNAL_INFERENCE_LATENT(Dataset):
         return image, label
     
 class BACKGROUND_SIGNAL_INFERENCE_LATENT_JETCLASS(Dataset):
-    def __init__(self, root, datatype, runs, latent_dim, labeled_num = 5, rand_number=0, finetune=False ,transform=None, target_transform=None, embedding_type = 'SimpleDense'):
+    def __init__(self, root, datatype, runs, latent_dim, labeled_num = 5, rand_number=0, finetune=False ,transform=None, target_transform=None, embedding_type = 'SimpleDense_JetClass'):
         '''
         Define the ORCA input dataclass without explicitly inputting the embedding files but instead doing inference on the saved model weights.
         embedding_type: Describes the architecture used to get the neural embedding choice = ('SimpleDense', 'SimpleDense_small, 'dino_transformer'), default = 'mlp'
@@ -539,19 +539,20 @@ class BACKGROUND_SIGNAL_INFERENCE_LATENT_JETCLASS(Dataset):
         drive_path = f'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\'
         #drive_path_lxplus = os.path.join(os.path.abspath('../dino'), 'dataset_background_signal.npz')
         #Run inference to get the embedding of the test set for further use in ORCA
-        dataset = np.load(drive_path+'jetclass_dataset/JetClass_background_signal_reshaped.npz')
+        #dataset = np.load(drive_path+'jetclass_dataset/JetClass_background_signal_reshaped.npz')
+        dataset = np.load(drive_path+'jetclass_dataset/JetClass_background_higgs_signal_testset.npz')
         #dataset = np.load(drive_path_lxplus)
         labels_test = dataset['labels_test'].reshape(-1)
         data_test = dataset['x_test'].reshape(-1,512)
         
-        if embedding_type == 'dino_transformer':
+        if embedding_type == 'dino_transformer_JetClass':
             drive_path = f'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\dino\\'
             drive_path_lxplus = os.path.abspath('../dino/')
             data_test = data_test.reshape(-1,128,4)
         
         if finetune == False:
-            #embedded_test = self.inference(drive_path + f'output/{self.runs}/', data_test, labels_test, embedding_type=embedding_type)
-            embedded_test = data_test
+            embedded_test = self.inference(drive_path + f'output/{self.runs}/', data_test, labels_test, embedding_type=embedding_type)
+            #embedded_test = data_test
         elif finetune:
             embedded_test = data_test
         
@@ -609,14 +610,11 @@ class BACKGROUND_SIGNAL_INFERENCE_LATENT_JETCLASS(Dataset):
         else: 
             device = device
         #Import model for embedding depending on embedding_type
-        if embedding_type == 'SimpleDense':
+        if embedding_type == 'SimpleDense_JetClass':
             model = SimpleDense_JetClass(self.latent_dim).to(device)
             model.load_state_dict(torch.load(model_name + 'vae.pth', map_location=torch.device(device)))
-        elif embedding_type == 'SimpleDense_small':
-            model = SimpleDense_small(self.latent_dim).to(device)
-            model.load_state_dict(torch.load(model_name + 'vae.pth', map_location=torch.device(device)))
-        elif embedding_type == 'dino_transformer':
-            model = TransformerEncoder(**transformer_args_standard)
+        elif embedding_type == 'dino_transformer_JetClass':
+            model = TransformerEncoder(**transformer_args_jetclass)
             model.load_state_dict(torch.load(model_name + '_teacher_dino_transformer.pth', map_location=torch.device(device)))
 
         model.eval()

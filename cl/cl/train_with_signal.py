@@ -43,7 +43,7 @@ def main(args):
         feat_std = np.std(dataset['x_train'].reshape(-1, feat_dim), axis=0),
     )
     #Initialize transform (empty list: None)
-    transform = augmentations.Transform(["naive_masking"], feat_dim)
+    transform = augmentations.Transform(["gaussian_resampling_pT", "naive_masking"], feat_dim)
     
     train_data_loader = DataLoader(
         TorchCLDataset(dataset['x_train'].reshape(-1,feat_dim), dataset['labels_train'].reshape(-1), device),
@@ -64,12 +64,12 @@ def main(args):
         model = SimpleDense_JetClass(args.latent_dim).to(device)
         summary(model, input_size=(512,))
     else:
-        model = SimpleDense(args.latent_dim).to(device)
-        #model = SimpleDense_small().to(device)
+        #model = SimpleDense(args.latent_dim).to(device)
+        model = SimpleDense_small().to(device)
         summary(model, input_size=(57,))
 
     # criterion = losses.SimCLRLoss()
-    #criterion = losses.VICRegLoss()
+    #criterion = losses.VICRegLoss(inv_weight=10, var_weight=25, cov_weight=10)
     criterion = losses.SimCLRloss_nolabels_fast(temperature=args.loss_temp, base_temperature=args.loss_temp, contrast_mode='one')
     #Standard schedule
     """ optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-3) #Adams pytorch impl. of weight decay is equiv. to the L2 penalty.
@@ -106,7 +106,7 @@ def main(args):
             #embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
             #embedded_values_aug = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42))
             feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
-            #similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,96)), embedded_values_aug.reshape((-1,96)))
+            #similar_embedding_loss = criterion(embedded_values_orig, embedded_values_aug)
 
             similar_embedding_loss = criterion(feature)
             
@@ -152,7 +152,7 @@ def main(args):
                 #embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
                 #embedded_values_aug = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42))
                 feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
-                #similar_embedding_loss = criterion(embedded_values_orig.reshape((-1,96)), embedded_values_aug.reshape((-1,96)))
+                #similar_embedding_loss = criterion(embedded_values_orig, embedded_values_aug)
                 
                 similar_embedding_loss = criterion(feature)
 
@@ -237,6 +237,7 @@ def main(args):
             with torch.no_grad():
                 embedding = np.concatenate([model.representation(data.to(device)).cpu().detach().numpy() for (data, label) in loader], axis=0)
                 embedding_dict[f"embedding_{name}"] = embedding
+                embedding_dict[f"labels_{name}"] = dataset[f'labels_{name}']
 
         np.savez(args.output_filename, **embedding_dict)
         print(f"Successfully saved embedding under {args.output_filename}")

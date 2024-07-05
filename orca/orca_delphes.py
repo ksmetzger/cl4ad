@@ -13,7 +13,7 @@ import os
 from torch.utils.tensorboard import SummaryWriter
 from itertools import cycle
 import time
-from models.models_cl import SimpleDense, SimpleDense_small, Identity, TransformerEncoder, transformer_args_standard
+from models.models_cl import SimpleDense, SimpleDense_small, Identity, TransformerEncoder, transformer_args_standard, SimpleDense_JetClass, transformer_args_jetclass
 from torchsummary import summary
 
 
@@ -82,8 +82,10 @@ def train(args, model, device, train_label_loader, train_unlabel_loader, optimiz
         entropy_loss = entropy(torch.mean(prob, 0))
         
         #Try weighing the pairwise objective (bce_loss) more
-        pairwise_weight = 1.
-        loss = - entropy_loss + ce_loss + pairwise_weight* bce_loss
+        pairwise_weight = 1.0
+        reg_weight = 1.0
+        sup_weight = 1.0
+        loss = - reg_weight*entropy_loss + sup_weight*ce_loss + pairwise_weight* bce_loss
 
         bce_losses.update(bce_loss.item(), args.batch_size)
         ce_losses.update(ce_loss.item(), args.batch_size)
@@ -96,8 +98,9 @@ def train(args, model, device, train_label_loader, train_unlabel_loader, optimiz
     tf_writer.add_scalar('loss/bce', bce_losses.avg, epoch)
     tf_writer.add_scalar('loss/ce', ce_losses.avg, epoch)
     tf_writer.add_scalar('loss/entropy', entropy_losses.avg, epoch)
+    tf_writer.add_scalar('loss',-reg_weight*entropy_losses.avg + sup_weight*ce_losses.avg + pairwise_weight*bce_losses.avg, epoch)
     #Print the total loss after each epoch
-    print("Loss: ", -entropy_losses.avg + ce_losses.avg + bce_losses.avg)
+    print("Loss: ", -reg_weight*entropy_losses.avg + sup_weight*ce_losses.avg + pairwise_weight*bce_losses.avg)
 
 def test(args, model, labeled_num, device, test_loader, epoch, tf_writer, num_classes):
     model.eval()
@@ -127,14 +130,20 @@ def test(args, model, labeled_num, device, test_loader, epoch, tf_writer, num_cl
     overall_acc = cluster_acc(preds, targets)
     seen_acc = accuracy(preds[seen_mask], targets[seen_mask])
     unseen_acc = cluster_acc(preds[unseen_mask], targets[unseen_mask])
+    signal_as_background_acc = np.sum(preds[unseen_mask] < labeled_num)/len(preds[unseen_mask])
+    background_as_signal_acc = np.sum(preds[seen_mask] >= labeled_num)/len(preds[seen_mask])
     unseen_nmi = metrics.normalized_mutual_info_score(targets[unseen_mask], preds[unseen_mask])
     #Add adjusted mutual info score
     unseen_nmi_adjusted = metrics.adjusted_mutual_info_score(targets[unseen_mask], preds[unseen_mask])
     mean_uncert = 1 - np.mean(confs)
-    print('Test overall acc {:.4f}, seen acc {:.4f}, unseen acc {:.4f}'.format(overall_acc, seen_acc, unseen_acc))
+    print('Test overall acc {:.4f}, seen acc {:.4f}, unseen acc {:.4f}, signal_as_back {:.4f}, back_as_signal {:.4f}'.format(overall_acc, seen_acc, unseen_acc,signal_as_background_acc, background_as_signal_acc))
+    for i in range(num_classes):
+        print(f'Class number {i} total: {np.sum(preds==i)}')
     tf_writer.add_scalar('acc/overall', overall_acc, epoch)
     tf_writer.add_scalar('acc/seen', seen_acc, epoch)
     tf_writer.add_scalar('acc/unseen', unseen_acc, epoch)
+    tf_writer.add_scalar('acc/signal_as_background', signal_as_background_acc, epoch)
+    tf_writer.add_scalar('acc/background_as_signal', background_as_signal_acc, epoch)
     tf_writer.add_scalar('nmi/unseen', unseen_nmi, epoch)
     tf_writer.add_scalar('nmi-adjusted/unseen', unseen_nmi_adjusted, epoch)
     tf_writer.add_scalar('uncert/test', mean_uncert, epoch)
@@ -161,7 +170,7 @@ def main():
     parser.add_argument('--runs', type=str, default='runs59')
     parser.add_argument('--latent-dim', type=int, default=48)
     parser.add_argument('--finetune', action='store_true')
-    parser.add_argument('--embedding-type', type=str, choices=('SimpleDense', 'SimpleDense_small', 'dino_transformer'), default='SimpleDense')
+    parser.add_argument('--embedding-type', type=str, choices=('SimpleDense', 'SimpleDense_small', 'dino_transformer', 'SimpleDense_JetClass', 'dino_transformer_JetClass'), default='SimpleDense')
 
     args = parser.parse_args()
     args.cuda = torch.cuda.is_available()
@@ -215,8 +224,8 @@ def main():
         train_unlabel_set = datasets.BACKGROUND_SIGNAL_INFERENCE_LATENT(root='./datasets',datatype='train_unlabeled', runs=args.runs, latent_dim=args.latent_dim, labeled_num=args.labeled_num, finetune=args.finetune, embedding_type=args.embedding_type, transform=TransformTwice(datasets.dict_transform['cifar_train_kyle_cvae']))
         test_set = datasets.BACKGROUND_SIGNAL_INFERENCE_LATENT(root='./datasets',datatype='test', runs=args.runs, latent_dim=args.latent_dim, labeled_num=args.labeled_num, finetune=args.finetune, embedding_type=args.embedding_type, transform=datasets.dict_transform['cifar_test_kyle_cvae'])
     elif args.dataset == 'background_with_signal_inference_latent_jetclass':
-        num_classes = 10
-        args.labeled_num = 5
+        num_classes = 6
+        args.labeled_num = 1
         train_label_set = datasets.BACKGROUND_SIGNAL_INFERENCE_LATENT_JETCLASS(root='./datasets',datatype='train_labeled', runs=args.runs, latent_dim=args.latent_dim, labeled_num=args.labeled_num, finetune=args.finetune, embedding_type=args.embedding_type, transform=TransformTwice(datasets.dict_transform['cifar_train_kyle_cvae']))
         train_unlabel_set = datasets.BACKGROUND_SIGNAL_INFERENCE_LATENT_JETCLASS(root='./datasets',datatype='train_unlabeled', runs=args.runs, latent_dim=args.latent_dim, labeled_num=args.labeled_num, finetune=args.finetune, embedding_type=args.embedding_type, transform=TransformTwice(datasets.dict_transform['cifar_train_kyle_cvae']))
         test_set = datasets.BACKGROUND_SIGNAL_INFERENCE_LATENT_JETCLASS(root='./datasets',datatype='test', runs=args.runs, latent_dim=args.latent_dim, labeled_num=args.labeled_num, finetune=args.finetune, embedding_type=args.embedding_type, transform=datasets.dict_transform['cifar_test_kyle_cvae'])
@@ -229,9 +238,9 @@ def main():
     labeled_batch_size = int(args.batch_size * labeled_len / (labeled_len + unlabeled_len))
 
     # Initialize the splits
-    train_label_loader = torch.utils.data.DataLoader(train_label_set, batch_size=labeled_batch_size, shuffle=True, num_workers=1, drop_last=True) #Changed num_workers=1, as it sometimes gave an error.
-    train_unlabel_loader = torch.utils.data.DataLoader(train_unlabel_set, batch_size=args.batch_size - labeled_batch_size, shuffle=True, num_workers=1, drop_last=True) #Changed num_workers=1, as it sometimes gave an error.
-    test_loader = torch.utils.data.DataLoader(test_set, batch_size=1024, shuffle=False, num_workers=1) #Batch size changed from 100 to 512 for more data points (DELPHES), back to 100 as a test
+    train_label_loader = torch.utils.data.DataLoader(train_label_set, batch_size=labeled_batch_size, shuffle=True, num_workers=0, drop_last=True) #Changed num_workers=1, as it sometimes gave an error.
+    train_unlabel_loader = torch.utils.data.DataLoader(train_unlabel_set, batch_size=args.batch_size - labeled_batch_size, shuffle=True, num_workers=0, drop_last=True) #Changed num_workers=1, as it sometimes gave an error.
+    test_loader = torch.utils.data.DataLoader(test_set, batch_size=1024, shuffle=False, num_workers=0) #Batch size changed from 100 to 512 for more data points (DELPHES), back to 100 as a test
     #Print the lengths of the dataloaders
     print('Len of train_label_loader: ',len(train_label_loader))
     print('Len of train_unlabel_loader: ',len(train_unlabel_loader))
@@ -267,18 +276,23 @@ def main():
     #If finetune, add embedding model to finetune layers with ORCA objective
     if args.finetune:
         #Load pretrained weights
-        if args.embedding_type == 'SimpleDense' or args.embedding_type == 'SimpleDense_small':
+        if args.embedding_type == 'SimpleDense' or args.embedding_type == 'SimpleDense_small' or args.embedding_type == 'SimpleDense_JetClass':
             drive_path = f'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\'
-            if args.latent_dim == 48:
+            if args.embedding_type == 'SimpleDense':
                 finetune = SimpleDense(args.latent_dim)
-            elif args.latent_dim == 6:
+            elif args.embedding_type == 'SimpleDense_small':
                 finetune = SimpleDense_small(args.latent_dim)
+            elif args.embedding_type == 'SimpleDense_JetClass':
+                finetune = SimpleDense_JetClass(args.latent_dim)
             finetune.load_state_dict(torch.load(drive_path+f'output/{args.runs}/vae.pth', map_location=torch.device(device)))
             finetune.expander = nn.Identity()
-        elif args.embedding_type == 'dino_transformer':
+        elif args.embedding_type == 'dino_transformer' or args.embedding_type =='dino_transformer_JetClass':
             drive_path = f'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\dino\\'
             #drive_path_lxplus = os.path.abspath('../dino/')
-            finetune = TransformerEncoder(**transformer_args_standard)
+            if args.embedding_type == 'dino_transformer':
+                finetune = TransformerEncoder(**transformer_args_standard)
+            elif args.embedding_type == 'dino_transformer_JetClass':
+                finetune = TransformerEncoder(**transformer_args_jetclass)
             finetune.load_state_dict(torch.load(drive_path+f'output/{args.runs}/_teacher_dino_transformer.pth', map_location=torch.device(device)))
             finetune.dino_head = nn.Identity()
             #Freeze the model except for the MLP
@@ -314,9 +328,11 @@ def main():
 
     # Set the optimizer
     #Try out the Adam optimizer for the delphes data (no weight decay and momentum first)
-    optimizer = optim.Adam(model.parameters() , lr=1e-3) 
+    optimizer = optim.Adam(model.parameters() , lr=1e-4)
+    #optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-6)
     
-    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.milestones, gamma=0.1)
+    #scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.milestones, gamma=0.1)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs, eta_min=1e-6)
 
     tf_writer = SummaryWriter(log_dir=args.savedir)
     
@@ -327,6 +343,7 @@ def main():
     for epoch in range(args.epochs):
         mean_uncert, targets_preds_conf, prob_softmax = test(args, model, args.labeled_num, device, test_loader, epoch, tf_writer, num_classes) #removed , latent for memory reasons 
         print("Mean uncertainty m: ", mean_uncert)
+        print(f"Learning rate: {scheduler.get_last_lr()[0]:.6f}")
         train(args, model, device, train_label_loader, train_unlabel_loader, optimizer, mean_uncert, epoch, tf_writer)
         print('Epoch: ',epoch)
 

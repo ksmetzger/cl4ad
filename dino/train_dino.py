@@ -5,6 +5,7 @@ import time
 import datetime
 import os
 import random
+from tqdm import tqdm
 
 import torch
 import torch.nn as nn
@@ -32,6 +33,7 @@ def main(args):
 
     #Dataset with signals and original divisions=[0.592,0.338,0.067,0.003]
     dataset = np.load(os.path.join(os.getcwd(), args.dataset))
+    #dataset = np.load("C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\"+args.dataset)
 
     if args.type == 'JetClass':
         feat_dim = 4
@@ -73,7 +75,7 @@ def main(args):
         input_dim=4, 
         model_dim=128, 
         output_dim=args.out_dim,
-        embed_dim=64,   #Only change embed_dim without describing new transformer architecture
+        embed_dim=6,   #Only change embed_dim without describing new transformer architecture
         n_heads=8, 
         dim_feedforward=256, 
         n_layers=4,
@@ -145,8 +147,9 @@ def main(args):
     def train_one_epoch(epoch_index, tb_writer):
         running_sim_loss = 0.
         last_sim_loss = 0.
-
-        for it, val in enumerate(train_data_loader):
+        loop = tqdm(train_data_loader)
+        for it, val in enumerate(loop):
+            loop.set_description(f'Epoch {epoch_index}')
             val = val[0]
             # only applicable to the final batch
             if val.shape[0] != args.batch_size:
@@ -198,6 +201,8 @@ def main(args):
                 tb_x = it
                 tb_writer.add_scalar('DINOLoss/train', last_sim_loss, tb_x)
                 running_sim_loss = 0.
+                #print(f'Training iteration {it} at train_loss {last_sim_loss}')
+            loop.set_postfix(train_loss=last_sim_loss)
         return last_sim_loss
 
     @torch.no_grad()
@@ -243,6 +248,8 @@ def main(args):
         val_losses = []
         start_time = time.time()
         #Initialize the Early Stopper
+        folder = "output/checkpoints"
+        os.makedirs(folder, exist_ok=True)
         #EarlyStopper = EarlyStopping(patience=5, delta=0, path=args.model_name, verbose=True)
         print("Starting DINO training !")
         for epoch in range(1, args.epochs+1):
@@ -262,14 +269,19 @@ def main(args):
             print(f"Train/Val DINO Loss after epoch: {avg_train_loss:.4f}/{avg_val_loss:.4f}")
             print(f"taking {temp_time:.1f}s to complete")
 
+            #Save checkpoint
+            path = os.path.join(folder, args.model_name)
+            torch.save(student.state_dict(), f"{path}_student_ep_{epoch}.pth")
+            torch.save(teacher.state_dict(), f"{path}_teacher_ep_{epoch}.pth")
+
             #Check whether to EarlyStop
             """ EarlyStopper(avg_val_loss, [teacher, student], epoch)
             if EarlyStopper.early_stop:
                 break """
 
         #Save both networks for now
-        torch.save(student.state_dict(), os.path.join(os.getcwd(), "_student_" + args.model_name))
-        torch.save(teacher.state_dict(), os.path.join(os.getcwd(), "_teacher_" + args.model_name))
+        torch.save(student.state_dict(), os.path.join(os.getcwd(), "_student_" + args.model_name+ ".pth"))
+        torch.save(teacher.state_dict(), os.path.join(os.getcwd(), "_teacher_" + args.model_name + ".pth"))
         #Add timing and print it
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
@@ -284,23 +296,24 @@ def main(args):
         
     else:
         #Evaluate using the teacher weights (backbone) as suggested by first author
-        teacher.load_state_dict(torch.load(os.path.join(os.getcwd(), "_teacher_" + args.model_name), map_location=torch.device(device)))
+        teacher.load_state_dict(torch.load(os.path.join(os.getcwd(), "output/runs66/_teacher_" + args.model_name), map_location=torch.device(device)))
         teacher.eval()
 
         #Save the embedding output for the background and signal part
         embedding_dict = dict()
         train_data_loader = DataLoader(
-        TorchCLDataset(dataset['x_train'], dataset['labels_train'], device),
+        TorchCLDataset(dataset['x_train'].reshape(-1,num_const,feat_dim), dataset['labels_train'].reshape(-1), device),
         batch_size=args.batch_size,
         shuffle=False)
         val_data_loader = DataLoader(
-        TorchCLDataset(dataset['x_val'], dataset['labels_val'], device),
+        TorchCLDataset(dataset['x_val'].reshape(-1,num_const,feat_dim), dataset['labels_val'].reshape(-1), device),
         batch_size=args.batch_size,
         shuffle=False)
         for loader, name in zip([train_data_loader, test_data_loader, val_data_loader],['train','test','val']):
             with torch.no_grad():
                 embedding = np.concatenate([teacher.representation(data).cpu().detach().numpy() for (data, label) in loader], axis=0)
                 embedding_dict[f"embedding_{name}"] = embedding
+                embedding_dict[f"labels_{name}"] = dataset[f'labels_{name}']
 
         np.savez(args.output_filename, **embedding_dict)
         print(f"Successfully saved embedding under {args.output_filename}")
@@ -379,7 +392,7 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=1)
     parser.add_argument('--batch-size', type=int, default=256)
     parser.add_argument('--loss-temp', type=float, default=0.07)
-    parser.add_argument('--model-name', type=str, default='dino_transformer.pth')
+    parser.add_argument('--model-name', type=str, default='dino_transformer')
     parser.add_argument('--scaling-filename', type=str)
     parser.add_argument('--output-filename', type=str, default='output/embedding.npz')
     parser.add_argument('--sample-size', type=int, default=-1)

@@ -2,7 +2,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import DataLoader, Dataset
-from dataset import TorchCLDataset, CLBackgroundDataset, CLSignalDataset, CLBackgroundSignalDataset
 from transformer import TransformerEncoder, Identity
 import augmentations
 import argparse
@@ -13,6 +12,7 @@ from torchsummary import summary
 import time
 import json
 import sys
+import random
 
 '''Linear evaluation of self-supervised embedding in order to calculate top1/top5 accuracies as
    standard in literature and leaderboards. Inspired by https://github.com/facebookresearch/vicreg/blob/main/evaluate.py.'''
@@ -29,7 +29,7 @@ def get_arguments():
     parser.add_argument("--epochs", default=10, type=int, metavar="N", help="number of epochs to train linear layer")
     parser.add_argument("--batch-size", default=1024, type=int, metavar="N")
     parser.add_argument("--weight-decay", default=1e-6, type=float, metavar="W", help="weight decay (for SGD and ADAM this is equivilant to the L2 penalty)")
-    parser.add_argument("--arch", type=str, default="TransformerEncoder", help="Type of model used to train embedding (backbone)")
+    parser.add_argument("--arch", type=str, choices=("TransformerEncoder", "TransformerEncoder_JetClass", "NoEmbedding"), help="Type of model used to train embedding (backbone)")
     parser.add_argument("--num-classes", default=8, type=int, help="number of classes (background + signals)")
     parser.add_argument("--type", default="freeze", type=str, choices=("freeze", "finetune"), help="Whether to freeze weights and train full data on linear layer or finetune the model with a semi-supervised approach.")
     parser.add_argument("--percent", default=1, type=int, choices=(1,10), help="If finetune, choose percentage of labeled train data the model is finetuned on.")
@@ -39,6 +39,11 @@ def get_arguments():
 
 
 def main():
+    #Set Seed
+    torch.manual_seed(0)
+    np.random.seed(0)
+    random.seed(0)
+
     #Get parser and device
     parser = get_arguments()
     args = parser.parse_args()
@@ -56,8 +61,15 @@ def main():
     print(" ".join(sys.argv), file=stats_file)
     best_acc = argparse.Namespace(top1=0, top5=0)
 
+    if args.arch == "TransformerEncoder_JetClass":
+        feat_dim = 4
+        num_const = 128
+    else:
+        num_const = 19
+        feat_dim = 3
+
     #Dataset with signals and original divisions=[0.592,0.338,0.067,0.003]
-    x_train, x_test, x_val, labels_train, labels_test, labels_val = load_data("C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\"+args.dataset)
+    x_train, x_test, x_val, labels_train, labels_test, labels_val = load_data("C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\"+args.dataset, feat_dim, num_const)
 
     #Get pretrained model
     if args.arch == "TransformerEncoder":
@@ -91,6 +103,23 @@ def main():
         #embed_dim=6
         embed_dim = transformer_args_standard["embed_dim"]
         backbone = TransformerEncoder(**transformer_args_standard)
+    elif args.arch == "TransformerEncoder_JetClass":
+        transformer_args_jetclass = dict(
+        input_dim=4, 
+        model_dim=128, 
+        output_dim=64,
+        embed_dim=6,   #Only change embed_dim without describing new transformer architecture
+        n_heads=8, 
+        dim_feedforward=256, 
+        n_layers=4,
+        hidden_dim_dino_head=256,
+        bottleneck_dim_dino_head=64,
+        pos_encoding = True,
+        use_mask = False,
+    )
+        embed_dim = transformer_args_jetclass["embed_dim"]
+        backbone = TransformerEncoder(**transformer_args_jetclass)
+
     elif args.arch == "NoEmbedding":
         embed_dim = 57
         backbone = Identity()
@@ -98,7 +127,7 @@ def main():
 
     #Load state_dict of embedding and freeze the layers
     state_dict = torch.load(args.pretrained, map_location='cpu')
-    backbone.load_state_dict(state_dict=state_dict, strict=False)
+    backbone.load_state_dict(state_dict=state_dict)
     
     head = nn.Linear(embed_dim, args.num_classes)
     head.weight.data.normal_(mean=0.0, std=0.01)
@@ -161,9 +190,9 @@ def main():
 
         #Train
         for step, (data, target) in enumerate(train_data_loader, start = epoch*len(train_data_loader)):
-            target = target.long()
+            target = target.long().to(device)
             #output = head(backbone.representation(augmentations.naive_masking(data, device=device, rand_number=0))) #Train with the same augmentations as the contrastive objective
-            output = head(backbone.representation(data.reshape(-1,19,3)))
+            output = head(backbone.representation(data.to(device)))
             loss = criterion(output, target.reshape(-1))
             optimizer.zero_grad()
             loss.backward()
@@ -186,7 +215,8 @@ def main():
         top5 = AverageMeter("Acc@5")
         with torch.no_grad():
             for data, target in val_data_loader:
-                output = head(backbone.representation(data.reshape(-1,19,3)))
+                target = target.to(device)
+                output = head(backbone.representation(data.to(device)))
                 acc1, acc5, = accuracy(output, target, topk=(1,5))
                 top1.update(acc1[0].item(), data.size(0))
                 top5.update(acc5[0].item(), data.size(0))
@@ -285,12 +315,36 @@ class AverageMeter(object):
         fmtstr = "{name} {val" + self.fmt + "} ({avg" + self.fmt + "})"
         return fmtstr.format(**self.__dict__)
     
-def load_data(data_dir=''):
+def load_data(data_dir='', feat_dim=3, num_const=19):
     dataset = np.load(data_dir)
-    x_train, labels_train = dataset['x_train'], dataset['labels_train']
-    x_test, labels_test = dataset['x_test'], dataset['labels_test']
-    x_val, labels_val = dataset['x_val'], dataset['labels_val']
+    x_train, labels_train = dataset['x_train'].reshape(-1,num_const,feat_dim), dataset['labels_train'].reshape(-1)
+    x_test, labels_test = dataset['x_test'].reshape(-1,num_const,feat_dim), dataset['labels_test'].reshape(-1)
+    x_val, labels_val = dataset['x_val'].reshape(-1,num_const,feat_dim), dataset['labels_val'].reshape(-1)
     return x_train, x_test, x_val, labels_train, labels_test, labels_val
+
+class TorchCLDataset(Dataset):
+  'Characterizes a dataset for PyTorch'
+  def __init__(self, features, labels, device):
+        'Initialization'
+        self.device = device
+        self.mean = np.mean(features)
+        self.std = np.std(features)
+        self.features = torch.from_numpy(features).to(dtype=torch.float32)
+        self.labels = torch.from_numpy(labels).to(dtype=torch.float32)
+
+  def __len__(self):
+        'Denotes the total number of samples'
+        return len(self.features)
+
+  def __getitem__(self, index):
+        'Generates one sample of data'
+        # Load data and get label
+        X = self.features[index]
+        y = self.labels[index]
+        #Normalize again (!!! has already been pre-normalized with z_score pT norm.)
+        #X = (X-self.mean)/self.std
+
+        return X, y
 
 if __name__ == "__main__":
     main()
