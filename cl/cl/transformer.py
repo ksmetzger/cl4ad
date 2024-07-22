@@ -221,7 +221,7 @@ if __name__ == "__main__":
         hidden_dim_dino_head=256,
         bottleneck_dim_dino_head=64,
         pos_encoding = True,
-        use_mask = False,
+        use_mask = True,
     )
     #TransformerEncoder(**transformer_args_standard)
     plot_pos_encoding = PositionalEncoding(d_model=64)

@@ -62,14 +62,14 @@ def main(args):
         input_dim=3, 
         model_dim=64, 
         output_dim=args.out_dim,
-        embed_dim=12,   #Only change embed_dim without describing new transformer architecture
+        embed_dim=6,   #Only change embed_dim without describing new transformer architecture
         n_heads=8, 
         dim_feedforward=256, 
         n_layers=4,
         hidden_dim_dino_head=256,
         bottleneck_dim_dino_head=64,
         pos_encoding = True,
-        use_mask = False,
+        use_mask = True,
     )
     transformer_args_jetclass = dict(
         input_dim=4, 

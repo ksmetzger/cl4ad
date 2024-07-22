@@ -211,5 +211,5 @@ class Transform():
 
     def __call__(self, input):
         for augmentation in self.augmentations:
-            augmentation(input)
+            input = augmentation(input)
         return input

@@ -15,19 +15,19 @@ from models import CVAE, SimpleDense, DeepSets, SimpleDense_small, SimpleDense_J
 from transformer import TransformerEncoder
 import augmentations
 import math
+import utils_dpp as utils
 
 def main(args):
     '''
     Infastructure for training CVAE (background specific and with anomalies)
     '''
-
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    print(f'Using {device}')
-
     #Seed
     np.random.seed(0)
     torch.manual_seed(0)
     random.seed(0)
+
+    #Initialize the distributed backend
+    utils.init_distributed_mode(args)
 
     #Dataset with signals and original divisions=[0.592,0.338,0.067,0.003]
     dataset = np.load(args.dataset)
@@ -46,20 +46,22 @@ def main(args):
     #Initialize transform (empty list: None)
     transform = augmentations.Transform(["naive_masking"], feat_dim)
     
+    #Distributed samplers
+    sampler_train = torch.utils.data.DistributedSampler(TorchCLDataset(dataset['x_train'].reshape(-1,feat_dim), dataset['labels_train'].reshape(-1)), shuffle=True)
+    sampler_val = torch.utils.data.DistributedSampler(TorchCLDataset(dataset['x_val'].reshape(-1,feat_dim), dataset['labels_val'].reshape(-1)), shuffle=False)
+    sampler_test = torch.utils.data.DistributedSampler(TorchCLDataset(dataset['x_test'].reshape(-1,feat_dim), dataset['labels_test'].reshape(-1)), shuffle=False)
+
     train_data_loader = DataLoader(
-        TorchCLDataset(dataset['x_train'].reshape(-1,feat_dim), dataset['labels_train'].reshape(-1), device),
-        batch_size=args.batch_size,
-        shuffle=True)
+        TorchCLDataset(dataset['x_train'].reshape(-1,feat_dim), dataset['labels_train'].reshape(-1)),
+        batch_size=args.batch_size, sampler=sampler_train)
 
     test_data_loader = DataLoader(
-        TorchCLDataset(dataset['x_test'].reshape(-1,feat_dim), dataset['labels_test'].reshape(-1), device),
-        batch_size=args.batch_size,
-        shuffle=False)
+        TorchCLDataset(dataset['x_test'].reshape(-1,feat_dim), dataset['labels_test'].reshape(-1)),
+        batch_size=args.batch_size, sampler=sampler_test)
 
     val_data_loader = DataLoader(
-        TorchCLDataset(dataset['x_val'].reshape(-1,feat_dim), dataset['labels_val'].reshape(-1), device),
-        batch_size=args.batch_size,
-        shuffle=False)
+        TorchCLDataset(dataset['x_val'].reshape(-1,feat_dim), dataset['labels_val'].reshape(-1)),
+        batch_size=args.batch_size, sampler=sampler_val)
 
     if args.type == 'JetClass':
         model = SimpleDense_JetClass(args.latent_dim).to(device)
@@ -348,9 +350,8 @@ def adjust_learning_rate(args, warmup_epochs ,epoch, optimizer, base_lr):
 
 class TorchCLDataset(Dataset):
   'Characterizes a dataset for PyTorch'
-  def __init__(self, features, labels, device):
+  def __init__(self, features, labels):
         'Initialization'
-        self.device = device
         self.mean = np.mean(features)
         self.std = np.std(features)
         #print(f"Mean: {self.mean} and std: {self.std}")

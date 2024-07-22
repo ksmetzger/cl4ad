@@ -182,5 +182,5 @@ class Transform():
 
     def __call__(self, input):
         for augmentation in self.augmentations:
-            augmentation(input, feat_dim=self.feat_dim, num_const=self.num_const)
+            input = augmentation(input, feat_dim=self.feat_dim, num_const=self.num_const)
         return input

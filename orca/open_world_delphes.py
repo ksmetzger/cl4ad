@@ -19,7 +19,7 @@ from sklearn.utils import shuffle
 import warnings
 import torch
 import augmentations
-from models.models_cl import SimpleDense, SimpleDense_small, TransformerEncoder, transformer_args_standard, SimpleDense_JetClass, transformer_args_jetclass
+from models.models_cl import SimpleDense, SimpleDense_small, TransformerEncoder, transformer_args_standard, SimpleDense_JetClass, transformer_args_jetclass, CVAE_JetClass
 
 class BACKGROUND(Dataset):
 
@@ -611,7 +611,8 @@ class BACKGROUND_SIGNAL_INFERENCE_LATENT_JETCLASS(Dataset):
             device = device
         #Import model for embedding depending on embedding_type
         if embedding_type == 'SimpleDense_JetClass':
-            model = SimpleDense_JetClass(self.latent_dim).to(device)
+            #model = SimpleDense_JetClass(self.latent_dim).to(device)
+            model = CVAE_JetClass(self.latent_dim).to(device)
             model.load_state_dict(torch.load(model_name + 'vae.pth', map_location=torch.device(device)))
         elif embedding_type == 'dino_transformer_JetClass':
             model = TransformerEncoder(**transformer_args_jetclass)

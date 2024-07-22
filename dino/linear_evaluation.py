@@ -78,7 +78,7 @@ def main():
             input_dim=3, 
             model_dim=64, 
             output_dim=64,
-            embed_dim=12, 
+            embed_dim=64, 
             n_heads=8, 
             dim_feedforward=256, 
             n_layers=4,
@@ -144,8 +144,7 @@ def main():
 
     #For semi-supervised fine-tuning create {percent} of the original x_train
     if args.type == "finetune":
-        np.random.seed(0)
-        idx_percent = np.random.choice(labels_train.shape[0], size = int(args.percent/100*labels_train.shape[0]) ,replace=False) #Already seeded from dataset call
+        idx_percent = np.random.choice(labels_train.shape[0], size = int(args.percent/100*labels_train.shape[0]) ,replace=False)
         x_train = x_train[idx_percent]
         labels_train = labels_train[idx_percent]
 

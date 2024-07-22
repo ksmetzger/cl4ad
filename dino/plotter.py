@@ -103,6 +103,29 @@ dict_labels_names = {
                     15: '',
                             } """
 
+#Dicts for JetClass
+dict_labels_color = {0: 'teal', 
+                     1: 'lightseagreen', 
+                     2: 'springgreen', 
+                     3: 'darkgreen', 
+                     4: 'lightcoral', 
+                     5: 'maroon', 
+                     6: 'fuchsia', 
+                     7: 'indigo',
+                     8: 'orange',
+                     9: 'brown'
+                             }
+dict_labels_names = {0: 'QCD-background', 
+                     1: 'hToBB', 
+                     2: 'hToCC', 
+                     3: 'hToGG', 
+                     4: 'hTo4q', 
+                     5: 'hTolvqq', 
+                     6: 'tTobqq', 
+                     7: 'tToblv',
+                     8: 'WToqq',
+                     9: 'ZToqq',
+                             }
 #t-SNE Plot of given embedding colored according to given labels
 def tSNE(embedding, labels, title, filename, namedir, dict_labels_color, dict_labels_names, rand_number=0, orca=False):
     
@@ -277,9 +300,11 @@ def corner_plot(embedding, labels, title, filename, dict_labels_color, dict_labe
     anomaly_df = pd.DataFrame()
     #Background part
     if background=='one':
-        mask = (labels < 4).reshape(-1)
+        #mask = (labels < 4).reshape(-1)
+        mask = (labels < 1).reshape(-1)
         background_embed = embedding[mask]
-        background_df = pd.concat([background_df, pd.DataFrame(sns_dict(background_embed, "SM-background"))])
+        #background_df = pd.concat([background_df, pd.DataFrame(sns_dict(background_embed, "SM-background"))])
+        background_df = pd.concat([background_df, pd.DataFrame(sns_dict(background_embed, "QCD-background"))])
     elif background == 'detail':
         for i in range(4): #Iterate through background classes
             mask = (labels == i).reshape(-1)
@@ -308,7 +333,8 @@ def corner_plot(embedding, labels, title, filename, dict_labels_color, dict_labe
     color_dict = {}
     for i in dict_labels_color.keys():
         color_dict[dict_labels_names[i]] = dict_labels_color[i]
-    color_dict["SM-background"] = 'grey'
+    #color_dict["SM-background"] = 'grey'
+    color_dict["QCD-background"] = 'grey'
 
     #Create cornerplot (pairplot)
     #corner = sns.pairplot(df, hue="label", kind='kde', palette=color_dict, corner=True)
@@ -337,7 +363,8 @@ def inference(model_name, input_data, input_labels, device=None):
         device = device
     #Import model for embedding
     #model = SimpleDense().to(device)
-    model = TransformerEncoder(**transformer_args_standard).to(device)
+    #model = TransformerEncoder(**transformer_args_standard).to(device)
+    model = TransformerEncoder(**transformer_args_jetclass).to(device)
     model.load_state_dict(torch.load(model_name, map_location=torch.device(device)))
     model.eval()
     #Get output with dataloader
@@ -368,8 +395,10 @@ def classification_score(backbone_name, head_name, input_data, input_labels, dev
     else:
         #backbone = SimpleDense().to(device)
         #embed_dim = 48
-        backbone = TransformerEncoder(**transformer_args_standard).to(device)
-        embed_dim = transformer_args_standard["embed_dim"]
+        #backbone = TransformerEncoder(**transformer_args_standard).to(device)
+        backbone = TransformerEncoder(**transformer_args_jetclass).to(device)
+        #embed_dim = transformer_args_standard["embed_dim"]
+        embed_dim = transformer_args_jetclass["embed_dim"]
         backbone.load_state_dict(torch.load(backbone_name, map_location=torch.device(device)))
 
     head = nn.Linear(embed_dim, num_classes).to(device)
@@ -427,16 +456,17 @@ def main(runs):
 
     #Load embedding (test (train/val used for model optim))
     drive_path = 'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\'
-    data = np.load(drive_path+'dataset_background_signal.npz')
+    #data = np.load(drive_path+'dataset_background_signal.npz')
+    data = np.load(drive_path+'jetclass_dataset/JetClass_background_signal_reshaped.npz')
     drive_path = 'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\dino\\'
     #data = np.load(drive_path+'background_dataset_fullyleptonic_divided.npz')
     #embedding = np.load(drive_path+'output/runs35/embedding.npz')
     #embedded_test = embedding['embedding_test']
     labels_test = data['labels_test']
-    data_test = data['x_test']
+    data_test = data['x_test'].reshape(-1,512)
     #labels_test = data['labels_test'][data['ix_test']]
     #data_test = data['x_test'][data['ix_test']]
-    embedded_test = inference(f'output/{runs}/_teacher_dino_transformer.pth', data_test.reshape(-1,19,3), labels_test)
+    embedded_test = inference(f'output/{runs}/_teacher_dino_transformer.pth', data_test.reshape(-1,128,4), labels_test)
     print(embedded_test.shape)
     embedded_test = embedded_test.reshape(-1,transformer_args_standard["embed_dim"])
 
@@ -477,15 +507,20 @@ def main(runs):
         print("===Plotting Cornerplot===")
         print(f"with {np.sum(idx)} datapoints")
         labels = labels_test
-        corner_plot(embedded_test[idx], labels[idx], f'Corner plot of (3D-PCA) of the embedding with anomaly leptoquark {iteration}', 
+        """ corner_plot(embedded_test[idx], labels[idx], f'Corner plot of (3D-PCA) of the embedding with anomaly leptoquark {iteration}', 
                     f'Corner plot of (3D-PCA) of the embedding with anomaly leptoquark{iteration}.png',dict_labels_color, dict_labels_names, pca=False, normalize=True, background='one', anomalies=['leptoquark'], folder=f'output/{runs}/plots/{subfolder}')
         corner_plot(embedded_test[idx], labels[idx], f'Corner plot of (3D-PCA) of the embedding with anomaly ato4l {iteration}', 
                     f'Corner plot of (3D-PCA) of the embedding with anomaly ato4l{iteration}.png',dict_labels_color, dict_labels_names, pca=False, normalize=True, background='one', anomalies=['ato4l'], folder=f'output/{runs}/plots/{subfolder}')
         corner_plot(embedded_test[idx], labels[idx], f'Corner plot of (3D-PCA) of the embedding with anomaly hChToTauNu {iteration}', 
                     f'Corner plot of (3D-PCA) of the embedding with anomaly hChToTauNu{iteration}.png',dict_labels_color, dict_labels_names, pca=False, normalize=True, background='one', anomalies=['hChToTauNu'], folder=f'output/{runs}/plots/{subfolder}')
         corner_plot(embedded_test[idx], labels[idx], f'Corner plot of (3D-PCA) of the embedding with anomaly hToTauTau {iteration}', 
-                    f'Corner plot of (3D-PCA) of the embedding with anomaly hToTauTau{iteration}.png',dict_labels_color, dict_labels_names, pca=False, normalize=True, background='one', anomalies=['hToTauTau'], folder=f'output/{runs}/plots/{subfolder}')
-        
+                    f'Corner plot of (3D-PCA) of the embedding with anomaly hToTauTau{iteration}.png',dict_labels_color, dict_labels_names, pca=False, normalize=True, background='one', anomalies=['hToTauTau'], folder=f'output/{runs}/plots/{subfolder}') """
+        for i, key in enumerate(dict_labels_names.values()):
+            print(f"Corner plot for anomaly {key}")
+            if i != 0:
+                corner_plot(embedded_test[idx], labels[idx], f'Corner plot of (3D-PCA) of the embedding with anomaly {key}{iteration}', 
+                            f'Corner plot of (3D-PCA) of the embedding with anomaly {key}{iteration}.png',dict_labels_color, dict_labels_names, pca=False, normalize=True, background='one', anomalies=[key], folder=f'output/{runs}/plots/{subfolder}')
+
     def animate_method(data_test, labels_test, method='corner'):
         """
             methods implemented so far: 'corner', ...
@@ -527,4 +562,4 @@ def main(runs):
     #animate_method(data_test, labels_test, method='corner')
 
 if __name__ == '__main__':
-    main('runs66')
+    main('runs93')
