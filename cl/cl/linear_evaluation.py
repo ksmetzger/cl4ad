@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import DataLoader, Dataset
 import losses
-from models import CVAE, SimpleDense, DeepSets, Identity, SimpleDense_small, SimpleDense_JetClass, CVAE_JetClass
+from models import CVAE, SimpleDense, DeepSets, Identity, SimpleDense_small, SimpleDense_JetClass, CVAE_JetClass, SimpleDense_ADC
 import augmentations
 import argparse
 from pathlib import Path
@@ -16,6 +16,7 @@ import json
 import sys
 from sklearn.utils import shuffle
 from transformer import TransformerEncoder
+import h5py
 
 '''Linear evaluation of self-supervised embedding in order to calculate top1/top5 accuracies as
    standard in literature and leaderboards. Inspired by https://github.com/facebookresearch/vicreg/blob/main/evaluate.py.'''
@@ -77,7 +78,8 @@ def main():
         feat_dim = (-1,57)
 
     #Dataset with signals and original divisions=[0.592,0.338,0.067,0.003]
-    x_train, x_test, x_val, labels_train, labels_test, labels_val = load_data(args.dataset, feat_dim)
+    #x_train, x_test, x_val, labels_train, labels_test, labels_val = load_data(args.dataset, feat_dim)
+    x_train, x_test, x_val, labels_train, labels_test, labels_val = load_data_nfolds(args.dataset, feat_dim)
 
     #Get transformations to apply in the training process
     transform = augmentations.Transform([], feat_dim)
@@ -96,11 +98,14 @@ def main():
         embed_dim = args.latent_dim
         backbone = CVAE_JetClass(latent_dim=args.latent_dim)
     elif args.arch == "NoEmbedding":
-        embed_dim = 512
+        embed_dim = 57
         backbone = Identity()
     elif args.arch == "SimpleDense_small":
         embed_dim = 6
         backbone = SimpleDense_small()
+    elif args.arch == "SimpleDense_ADC":
+        embed_dim = args.latent_dim
+        backbone = SimpleDense_ADC()
     elif args.arch == "SimpleDense_JetClass":
         embed_dim= args.latent_dim
         backbone = SimpleDense_JetClass(latent_dim=args.latent_dim)
@@ -234,7 +239,7 @@ def main():
             for data, target in val_data_loader:
                 target = target.to(device)
                 output = head(backbone.representation(data.to(device)))
-                acc1, acc5, = accuracy(output, target, topk=(1,5))
+                acc1, acc5, = accuracy(output, target, topk=(1,2))
                 top1.update(acc1[0].item(), data.size(0))
                 top5.update(acc5[0].item(), data.size(0))
 
@@ -300,7 +305,7 @@ def test_accuracy(dataloader, backbone, head, device):
     with torch.no_grad():
         for data, target in dataloader:
             output = head(backbone.representation(data.to(device)))
-            acc1, acc5, = accuracy(output, target, topk=(1,5))
+            acc1, acc5, = accuracy(output, target, topk=(1,2))
             top1.update(acc1[0].item(), data.size(0))
             top5.update(acc5[0].item(), data.size(0))
     best_acc.top1 = max(best_acc.top1, top1.avg)
@@ -337,6 +342,19 @@ def load_data(data_dir='', feat_dim=512):
     x_train, labels_train = dataset['x_train'].reshape(feat_dim), dataset['labels_train'].reshape(-1)
     x_test, labels_test = dataset['x_test'].reshape(feat_dim), dataset['labels_test'].reshape(-1)
     x_val, labels_val = dataset['x_val'].reshape(feat_dim), dataset['labels_val'].reshape(-1)
+    return x_train, x_test, x_val, labels_train, labels_test, labels_val
+
+def load_data_nfolds(data_dir='', feat_dim=512):
+    with h5py.File(f'{data_dir}', 'r') as f:
+        train_fold = np.array(f['x_train_fold_0'][...])
+        labels_train_fold = np.array(f['labels_train_fold_0'][...])
+        val_fold = np.array(f['x_train_fold_1'][...])
+        labels_val_fold = np.array(f['labels_train_fold_1'][...])
+        x_test = np.array(f['x_test'][...])
+        labels_test = np.array(f['labels_test'][...])
+    x_train, labels_train = train_fold.reshape(feat_dim), labels_train_fold.reshape(-1)
+    x_test, labels_test = x_test.reshape(feat_dim), labels_test.reshape(-1)
+    x_val, labels_val = val_fold.reshape(feat_dim), labels_val_fold.reshape(-1)
     return x_train, x_test, x_val, labels_train, labels_test, labels_val
 
 def sample_equal_class_size(data, labels, class_size):

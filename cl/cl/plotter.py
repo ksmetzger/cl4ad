@@ -381,7 +381,7 @@ def inference(model_name, input_data, input_labels, device=None):
     #model = SimpleDense_small().to(device)
     #model = DeepSets(latent_dim=6).to(device)
     #model = CVAE(latent_dim=6).to(device)
-    model = SimpleDense_JetClass(latent_dim=6).to(device)
+    #model = SimpleDense_JetClass(latent_dim=6).to(device)
     #model = CVAE_JetClass(latent_dim=6).to(device)
     transformer_args_jetclass = dict(
         input_dim=4, 
@@ -396,7 +396,7 @@ def inference(model_name, input_data, input_labels, device=None):
         pos_encoding = True,
         use_mask = True,
         )
-    #model = TransformerEncoder(**transformer_args_jetclass).to(device)
+    model = TransformerEncoder(**transformer_args_jetclass).to(device)
     model.load_state_dict(torch.load(model_name, map_location=torch.device(device)))
     model.eval()
     #Get output with dataloader
@@ -428,7 +428,7 @@ def classification_score(backbone_name, head_name, input_data, input_labels, dev
     else:
         #backbone = SimpleDense(latent_dim=12).to(device)
         #embed_dim = 12
-        backbone = SimpleDense_JetClass(latent_dim=6).to(device)
+        #backbone = SimpleDense_JetClass(latent_dim=6).to(device)
         embed_dim = 6
         #backbone = CVAE_JetClass(latent_dim=6).to(device)
         transformer_args_jetclass = dict(
@@ -444,7 +444,7 @@ def classification_score(backbone_name, head_name, input_data, input_labels, dev
         pos_encoding = True,
         use_mask = True,
         )
-        #backbone = TransformerEncoder(**transformer_args_jetclass).to(device)
+        backbone = TransformerEncoder(**transformer_args_jetclass).to(device)
         #backbone = SimpleDense_small().to(device)
         #embed_dim = 6
         backbone.load_state_dict(torch.load(backbone_name, map_location=torch.device(device)))
@@ -510,7 +510,7 @@ def main(runs):
     #embedding = np.load(drive_path+'output/runs35/embedding.npz')
     #embedded_test = embedding['embedding_test']
     labels_test = data['labels_test']
-    data_test = data['x_test'].reshape(-1,512)
+    data_test = data['x_test'].reshape(-1,128,4)
     #labels_test = data['labels_test'][data['ix_test']]
     #data_test = data['x_test'][data['ix_test']].reshape(-1,57)
     #embedded_test = inference(f'output/{runs}/vae.pth', data_test, labels_test)
@@ -533,12 +533,12 @@ def main(runs):
         print("===Plotting ROC curve===")
         labels = labels_test
         #All signal vs background class ROC
-        predictions = classification_score(f'output/{runs}/vae.pth', f'output/{runs}/head.pth', data_test, labels_test, mode='roc')
+        predictions = classification_score(f'output/{runs}/vae.pth', f'output/{runs}/head.pth', data_test.reshape(-1,128,4), labels_test, mode='roc')
         predictions_noembedding = classification_score('NoEmbedding', 'output/NoEmbeddingJetClass/head.pth', data_test, labels_test, mode='roc')
         plot_ROC(predictions, labels, title='ROC curve with AUC for SimCLR embedding with supervised linear evaluation', filename='ROC curve with AUC for SimCLR embedding with supervised linear evaluation.pdf', folder=f'output/{runs}/plots/')
         plot_ROC(predictions_noembedding, labels, title='ROC curve with AUC for No Embedding with supervised linear evaluation', filename='ROC curve with AUC for No Embedding with supervised linear evaluation.pdf', folder=f'output/{runs}/plots/')
         #One vs All ROC
-        predictions = classification_score(f'output/{runs}/vae.pth', f'output/{runs}/head.pth', data_test, labels_test, mode='all')
+        predictions = classification_score(f'output/{runs}/vae.pth', f'output/{runs}/head.pth', data_test.reshape(-1,128,4), labels_test, mode='all')
         predictions_noembedding = classification_score('NoEmbedding', 'output/NoEmbeddingJetClass/head.pth', data_test, labels_test, mode='all')
         plot_ROC_multiclass(predictions, labels, title='ROC curve with AUC for SimCLR embedding with supervised linear evaluation', filename='OnevsAll ROC curve with AUC for embedding with supervised linear evaluation.pdf', folder=f'output/{runs}/plots/', num_classes=10)
         plot_ROC_multiclass(predictions_noembedding, labels, title='ROC curve with AUC for No Embedding with supervised linear evaluation', filename='OnevsAll ROC curve with AUC for No Embedding with supervised linear evaluation.pdf', folder=f'output/{runs}/plots/', num_classes=10)
@@ -617,4 +617,4 @@ def main(runs):
     #animate_method(data_test, labels_test, method='corner')
 
 if __name__ == '__main__':
-    main('runs106')
+    main('runs105')

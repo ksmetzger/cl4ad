@@ -131,6 +131,46 @@ class SimpleDense_small(torch.nn.Module):
         z = self.expander(y)
         return z
     
+class SimpleDense_ADC(torch.nn.Module):
+    def __init__(self, latent_dim = 6, expanded_dim = 48):
+        super(SimpleDense_ADC, self).__init__()
+        s = 2
+        self.latent_dim = latent_dim
+        self.expanded_dim = expanded_dim*s
+        #Double size is expanded_dim=96, all lin. layers scaled s=2
+        #Normal size is expanded_dim=48, all lin. layers scaled s=1
+        self.encoder = torch.nn.Sequential(
+            nn.Linear(57,48*s),
+            nn.BatchNorm1d(48*s),
+            nn.LeakyReLU(),
+            #nn.Dropout(p=0.2),
+            nn.Linear(48*s,32*s),
+            nn.BatchNorm1d(32*s),
+            nn.LeakyReLU(),
+            #nn.Dropout(p=0.2),
+            nn.Linear(32*s,24*s),
+            nn.BatchNorm1d(24*s),
+            nn.LeakyReLU(),
+            #nn.Dropout(p=0.2),
+            nn.Linear(24*s,self.latent_dim),
+            nn.BatchNorm1d(self.latent_dim),
+            nn.LeakyReLU(),
+        )
+        self.expander = torch.nn.Sequential(
+            nn.Linear(self.latent_dim,24*s),
+            nn.BatchNorm1d(24*s),
+            nn.LeakyReLU(),
+            nn.Linear(24*s,self.expanded_dim),
+        )
+    def representation(self, x):
+        y = self.encoder(x)
+        return y
+    
+    def forward(self, x):
+        y = self.representation(x)
+        z = self.expander(y)
+        return z
+    
 class SimpleDense_JetClass(torch.nn.Module):
     def __init__(self, latent_dim = 48, expanded_dim = 128):
         super(SimpleDense_JetClass, self).__init__()

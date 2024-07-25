@@ -278,7 +278,7 @@ if __name__=='__main__':
         divisions=[0.30, 0.30, 0.20, 0.20],
     )
     background_dataset.report_specs()
-    #background_dataset.save(args.output_filename)
+    background_dataset.save(args.output_filename)
     print("=====================")
     # prepare signal datasets
     signal_dataset = CLSignalDataset(

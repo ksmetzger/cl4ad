@@ -199,6 +199,9 @@ def plot_tau2overtau1_histogram(embedding, labels, jet_feat, classes, jet_feat_n
             palette = palette_list[num]
             df_class = df[df["Label"]==num]
             print(df_class)
+            cbar_kws = {
+                 'alpha': 0.1
+            }
             sns.histplot(data=df_class, x=f'Dimension {dim+1}', hue=jet_feat_name, palette=palette, legend=True, ax=ax, multiple="dodge")
             legend = ax.get_legend()
             handle = legend.legend_handles
@@ -307,7 +310,7 @@ def main():
     rand_number = 0
     np.random.seed(rand_number)
     #Which embedding to use
-    runs = 'runs106'
+    runs = 'runs107'
     #And select which jet_level feature to visualize in latent space
     """ The available jet-level features are:
             jet_pt
@@ -324,25 +327,25 @@ def main():
             tau3overtau2 (3 prong)
             tau4overtau2 (4 prong)
             """
-    jet_feat_name = 'tau2overtau1'
+    #jet_feat_name = 'tau2overtau1'
     taudivisor = False
-    #classes = [0,1,2,3,4,5,6,7,8,9] #Classes to include, see corresponding class names in dict_labels_names
+    classes = [0,1,2,3,4,5,6,7,8,9] #Classes to include, see corresponding class names in dict_labels_names
     #classes = [0,1,2,3,4,5]
     #classes = [0,6,7,8,9]
-    classes = [0,1]
+    #classes = [0,1]
     #Getters
     embedding, labels = get_embedding(runs)
-    jet_feat = get_jet_feat(jet_feat_name, jet_feat_dict)
-    """ for jet_feat_name in jet_level_feat.values():
+    #jet_feat = get_jet_feat(jet_feat_name, jet_feat_dict)
+    for jet_feat_name in jet_level_feat.values():
         print(f'Plotting the jet-level feature: {jet_feat_name}')
         jet_feat = get_jet_feat(jet_feat_name, jet_feat_dict)
         #Plot
         plot_latent_gradient(embedding, labels, jet_feat, classes, jet_feat_name, title=f'Latent embedding colored by {jet_feat_name}', rand_state=rand_number, runs=runs, taudivisor=taudivisor)
         tile = (1,2) #Choose which dimensions to plot
         #plot_onetile_from_cornerplot(tile, embedding, labels, jet_feat, classes, jet_feat_name, title=f'Latent embedding tile {tile} colored by {jet_feat_name}', rand_state=rand_number, runs=runs)
-        #plot_onetile_with_subspace_first_eigenvector(tile, embedding, labels, jet_feat, classes, jet_feat_name, title=f'Latent embedding tile {tile} with eigenvector colored by {jet_feat_name}', rand_state=rand_number, runs=runs) """
+        #plot_onetile_with_subspace_first_eigenvector(tile, embedding, labels, jet_feat, classes, jet_feat_name, title=f'Latent embedding tile {tile} with eigenvector colored by {jet_feat_name}', rand_state=rand_number, runs=runs)
     #plot_tau2overtau1_histogram(embedding, labels, jet_feat, classes, jet_feat_name, title=f'Histogram of embedding colored by {jet_feat_name}', rand_state=rand_number, runs=runs, taudivisor=taudivisor)
-    plot_latent_gradient(embedding, labels, jet_feat, classes, jet_feat_name, title=f'Latent embedding colored by {jet_feat_name} two class distinction', rand_state=rand_number, runs=runs, taudivisor=taudivisor)
+    #plot_latent_gradient(embedding, labels, jet_feat, classes, jet_feat_name, title=f'Latent embedding colored by {jet_feat_name} two class distinction', rand_state=rand_number, runs=runs, taudivisor=taudivisor)
 if __name__ == '__main__':
     main()
          

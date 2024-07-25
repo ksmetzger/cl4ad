@@ -17,3 +17,4 @@ output_tuner
 *.pth
 *.root
 *.sh
+*.hdf5
