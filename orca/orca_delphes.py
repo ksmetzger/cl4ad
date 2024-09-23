@@ -15,6 +15,7 @@ from itertools import cycle
 import time
 from models.models_cl import SimpleDense, SimpleDense_small, Identity, TransformerEncoder, transformer_args_standard, SimpleDense_JetClass, transformer_args_jetclass
 from torchsummary import summary
+import random
 
 
 def train(args, model, device, train_label_loader, train_unlabel_loader, optimizer, m, epoch, tf_writer):
@@ -154,6 +155,11 @@ def test(args, model, labeled_num, device, test_loader, epoch, tf_writer, num_cl
 
 
 def main():
+    #Seed
+    np.random.seed(420)
+    torch.manual_seed(420)
+    random.seed(420)
+
     parser = argparse.ArgumentParser(description='orca')
     parser.add_argument('--milestones', nargs='+', type=int, default=[10, 20]) #Changed from [140,180] to [50,90]
     parser.add_argument('--dataset', default='cifar100', help='dataset setting')
@@ -284,7 +290,7 @@ def main():
                 finetune = SimpleDense_small(args.latent_dim)
             elif args.embedding_type == 'SimpleDense_JetClass':
                 finetune = SimpleDense_JetClass(args.latent_dim)
-            finetune.load_state_dict(torch.load(drive_path+f'output/{args.runs}/vae.pth', map_location=torch.device(device)))
+            finetune.load_state_dict(torch.load(drive_path+f'output/{args.runs}/vae3.pth', map_location=torch.device(device)))
             finetune.expander = nn.Identity()
         elif args.embedding_type == 'dino_transformer' or args.embedding_type =='dino_transformer_JetClass':
             drive_path = f'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\dino\\'

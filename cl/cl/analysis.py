@@ -8,6 +8,7 @@ from interpretation import get_gradient_JetClass, standardize_gradients, get_sub
 import torch
 from models import SimpleDense_JetClass
 import matplotlib.text as mtext
+import h5py
 
 class LegendTitle(object):
     def __init__(self, text_props=None):
@@ -26,10 +27,13 @@ def get_embedding(runs):
 
     #Load embedding (test (train/val used for model optim))
     drive_path = 'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\'
-    data = np.load(drive_path+'jetclass_dataset/JetClass_background_signal_reshaped.npz')
-    labels_test = data['labels_test']
-    data_test = data['x_test'].reshape(-1,512)
-    embedded_test = inference(f'output/{runs}/vae.pth', data_test, labels_test)
+    #data = np.load(drive_path+'jetclass_dataset/JetClass_background_signal_reshaped.npz')
+    #labels_test = data['labels_test']
+    #data_test = data['x_test'].reshape(-1,512)
+    with h5py.File(drive_path+f'JetClass_kfolded.hdf5', 'r') as f:
+        data_test = np.array(f['x_test'][...]).reshape(-1,512)
+        labels_test = np.array(f['labels_test'][...])
+    embedded_test = inference(f'output/{runs}/vae1.pth', data_test, labels_test)
     return embedded_test, labels_test
 
 def get_jet_feat(jet_feat_name, jet_feat_dict):
@@ -88,6 +92,9 @@ def plot_latent_gradient(embedding, labels, jet_feat, classes, jet_feat_name, ti
         df[jet_feat_name] = pd.qcut(df[jet_feat_name], q=5, precision=0)
     #Downsample for plotting
     df = df.sample(frac=0.05, replace=False, random_state=rand_state)
+    #Rename for the legend
+    legend_name = r'jet $\phi$'
+    df = df.rename(columns={jet_feat_name: legend_name})
     print(f"Plotting {df.shape} events")
     print(df)
     #Plot
@@ -104,20 +111,23 @@ def plot_latent_gradient(embedding, labels, jet_feat, classes, jet_feat_name, ti
         plot_kws = {
             's': 2,
         }
-    corner = sns.pairplot(data=df.drop("Label", axis=1), hue=jet_feat_name, kind='scatter', palette=palette, corner=True, plot_kws=plot_kws)
-    corner.figure.suptitle(title)
+    corner = sns.pairplot(data=df.drop("Label", axis=1), hue=legend_name, kind='scatter', palette=palette, corner=True, plot_kws=plot_kws)
+    #corner.figure.suptitle(title)
     #Set alpha and markersize in legend seperately
+    #corner.legend.set_title("test")
     corner.add_legend(markerscale=5)
+    #leg = corner._legend
+    #leg.set_title("test")
     plt.show()
-
+    plt.close("all")
     # Saves plot and reports success 
     filename = title + '.png'
     subfolder = os.path.dirname(__file__)
     subfolder = os.path.join(subfolder, f'output/{runs}/plots/')
     os.makedirs(subfolder, exist_ok=True)
     file_path = os.path.join(subfolder, filename)
-    corner.savefig(file_path) 
-    #plt.close('all')
+    corner.savefig(file_path, dpi=300) 
+    plt.close('all')
     print(f"Corner Plot saved as '{filename}'")
 
 def plot_onetile_from_cornerplot(tile, embedding, labels, jet_feat, classes, jet_feat_name, title, rand_state, runs):
@@ -209,9 +219,10 @@ def plot_tau2overtau1_histogram(embedding, labels, jet_feat, classes, jet_feat_n
             for t in text:
                 labels.append(t.get_text())
             handles.extend(handle)
-        ax.legend([dict_labels_names[classes[0]], handles[0], handles[1], dict_labels_names[classes[1]], handles[2], handles[3]], ["", labels[0], labels[1], "", labels[2], labels[3]], title=f'{jet_feat_name}', 
+        ax.legend([dict_labels_names[classes[0]], handles[0], handles[1], dict_labels_names[classes[1]], handles[2], handles[3]], ["", labels[0], labels[1], "", labels[2], labels[3]], title=r'$\tau_4/\tau_2$', 
                 handler_map ={str: LegendTitle({'fontsize': 8})}, title_fontsize = 12)
-        ax.figure.suptitle(title)
+        #plt.xlim(-0.1,14)
+        #ax.figure.suptitle(title)
         #plt.show()
         
         # Saves plot and reports success 
@@ -220,7 +231,7 @@ def plot_tau2overtau1_histogram(embedding, labels, jet_feat, classes, jet_feat_n
         subfolder = os.path.join(subfolder, f'output/{runs}/plots/')
         os.makedirs(subfolder, exist_ok=True)
         file_path = os.path.join(subfolder, filename)
-        plt.savefig(file_path) 
+        plt.savefig(file_path, dpi=300) 
         #plt.close('all')
         print(f"Tau2overTau1 histogram saved as '{filename}'")
      
@@ -280,13 +291,13 @@ jet_feat_dict = {
     'jet_tau4': 9,
 }
 dict_labels_names = {
-    0: 'QCD-background', 
+    0: 'QCD', 
     1: 'hToBB', 
-    2: 'hToCC', 
+    2: r'$\mathrm{H} \rightarrow \mathrm{c\overline{c}}$', 
     3: 'hToGG', 
-    4: 'hTo4q', 
+    4: r'$\mathrm{H}\rightarrow \mathrm{4q}$', 
     5: 'hTolvqq', 
-    6: 'tTobqq', 
+    6: r"$\mathrm{t}\rightarrow \mathrm{bqq'}$", 
     7: 'tToblv',
     8: 'WToqq',
     9: 'ZToqq',
@@ -310,7 +321,7 @@ def main():
     rand_number = 0
     np.random.seed(rand_number)
     #Which embedding to use
-    runs = 'runs107'
+    runs = 'runs333'
     #And select which jet_level feature to visualize in latent space
     """ The available jet-level features are:
             jet_pt
@@ -327,25 +338,26 @@ def main():
             tau3overtau2 (3 prong)
             tau4overtau2 (4 prong)
             """
-    #jet_feat_name = 'tau2overtau1'
-    taudivisor = False
-    classes = [0,1,2,3,4,5,6,7,8,9] #Classes to include, see corresponding class names in dict_labels_names
+    jet_feat_name = 'tau4overtau2'
+    #jet_feat_name = 'jet_phi'
+    taudivisor = 0.5
+    #classes = [0,1,2,3,4,5,6,7,8,9] #Classes to include, see corresponding class names in dict_labels_names
     #classes = [0,1,2,3,4,5]
     #classes = [0,6,7,8,9]
-    #classes = [0,1]
+    classes = [0,4]
     #Getters
     embedding, labels = get_embedding(runs)
-    #jet_feat = get_jet_feat(jet_feat_name, jet_feat_dict)
-    for jet_feat_name in jet_level_feat.values():
-        print(f'Plotting the jet-level feature: {jet_feat_name}')
-        jet_feat = get_jet_feat(jet_feat_name, jet_feat_dict)
+    jet_feat = get_jet_feat(jet_feat_name, jet_feat_dict)
+    #for jet_feat_name in jet_level_feat.values():
+        #print(f'Plotting the jet-level feature: {jet_feat_name}')
+        #jet_feat = get_jet_feat(jet_feat_name, jet_feat_dict)
         #Plot
-        plot_latent_gradient(embedding, labels, jet_feat, classes, jet_feat_name, title=f'Latent embedding colored by {jet_feat_name}', rand_state=rand_number, runs=runs, taudivisor=taudivisor)
-        tile = (1,2) #Choose which dimensions to plot
+        #plot_latent_gradient(embedding, labels, jet_feat, classes, jet_feat_name, title=f'Latent embedding colored by {jet_feat_name}', rand_state=rand_number, runs=runs, taudivisor=taudivisor)
+        #tile = (1,2) #Choose which dimensions to plot
         #plot_onetile_from_cornerplot(tile, embedding, labels, jet_feat, classes, jet_feat_name, title=f'Latent embedding tile {tile} colored by {jet_feat_name}', rand_state=rand_number, runs=runs)
         #plot_onetile_with_subspace_first_eigenvector(tile, embedding, labels, jet_feat, classes, jet_feat_name, title=f'Latent embedding tile {tile} with eigenvector colored by {jet_feat_name}', rand_state=rand_number, runs=runs)
-    #plot_tau2overtau1_histogram(embedding, labels, jet_feat, classes, jet_feat_name, title=f'Histogram of embedding colored by {jet_feat_name}', rand_state=rand_number, runs=runs, taudivisor=taudivisor)
-    #plot_latent_gradient(embedding, labels, jet_feat, classes, jet_feat_name, title=f'Latent embedding colored by {jet_feat_name} two class distinction', rand_state=rand_number, runs=runs, taudivisor=taudivisor)
+    plot_tau2overtau1_histogram(embedding, labels, jet_feat, classes, jet_feat_name, title=f'Histogram of embedding colored by {jet_feat_name}', rand_state=rand_number, runs=runs, taudivisor=taudivisor)
+    #plot_latent_gradient(embedding, labels, jet_feat, classes, jet_feat_name, title=f'Latent embedding colored by {jet_feat_name}', rand_state=rand_number, runs=runs, taudivisor=taudivisor)
 if __name__ == '__main__':
     main()
          

@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 #using the implemenation from pytorch, similar to "JetCLR": https://github.com/bmdillon/JetCLR/blob/main/scripts/modules/transformer.py
 class TransformerEncoder(nn.Module):
     def __init__(self,input_dim=3, model_dim=512, output_dim=512, embed_dim=64, n_heads=8, dim_feedforward=2048, n_layers=6, hidden_dim_dino_head=2048, bottleneck_dim_dino_head=256, head_norm=False, 
-                 dropout=0.1, norm_last_layer=True, pos_encoding=False, use_mask=False):
+                 dropout=0.1, norm_last_layer=False, pos_encoding=False, use_mask=False, mode='cls'):
         super(TransformerEncoder, self).__init__()
         self.input_dim = input_dim
         self.model_dim = model_dim
@@ -26,12 +26,14 @@ class TransformerEncoder(nn.Module):
         self.pos_encoding = pos_encoding
         self.use_mask = use_mask
         self.num_classes = 4 #Just background classes for AD Delphes
+        self.mode = mode
 
         #encoder part from pytorch
         self.embedding = nn.Linear(input_dim, model_dim)
         #Get a pre-norm tranformer encoder from pytorch
-        self.transformer = nn.TransformerEncoder(nn.TransformerEncoderLayer(model_dim, n_heads, dim_feedforward=dim_feedforward, dropout=dropout, norm_first=True), n_layers)
+        self.transformer = nn.TransformerEncoder(nn.TransformerEncoderLayer(model_dim, n_heads, dim_feedforward=dim_feedforward, dropout=dropout), n_layers) #, norm_first=True
         self.dino_head = DINOHead(in_dim=self.embed_dim, out_dim=self.output_dim, hidden_dim=self.hidden_dim_dino_head, bottleneck_dim=self.bottleneck_dim_dino_head, norm_last_layer=self.norm_last_layer)
+        #self.simclr_head = SimCLRHead(in_dim=self.embed_dim, out_dim=self.output_dim, hidden_dim=[32])
         #Define [CLS] token for aggregate result where head attaches
         self.cls_token = nn.Parameter(torch.zeros(1, 1, model_dim))
         #Add a classification head (just a linear layer)
@@ -39,29 +41,67 @@ class TransformerEncoder(nn.Module):
         #If pos_encoding = True, create and apply the positional encoding to the input
         self.pos_encoder = PositionalEncoding(self.model_dim, self.dropout)
         #In order to downsize to a smaller embedding without lowering the model_dim, append an MLP to the CLS token
-        self.downsize = MLP(input_dim=model_dim, embed_dim=embed_dim, hidden_channels=[32])
+        #self.downsize = MLP(input_dim=model_dim, embed_dim=embed_dim, hidden_channels=[32])
+        self.downsize = nn.Linear(self.model_dim, self.embed_dim)
+        self.flatten_output = nn.Linear(self.model_dim * 19, self.embed_dim)
     
     #Embedding output without the DINO head
-    def representation(self, x, mask=None):
+    def representation(self, x, x_before_augmentation, mask=None):
         if self.use_mask==True: #Mask zero padded pT (no particles) because of the softmax in the attention mechanism
-            mask = self.make_mask(x)
+            #mask, pT_zero = self.make_mask(x_before_augmentation, mode=self.mode)
+            mask, pT_zero = self.make_src_key_padding_mask(x_before_augmentation, mode=self.mode)
         self.batch_size = x.shape[0]
         #Create embedding for tranformer input
+        #print(f"X-before embedding: {x}")
+        #print(f"Is NAN? : {torch.isnan(x).sum()}")
         x = self.embedding(x)
+        #print(f"X-after embedding: {x}")
+        #print(f"Is NAN? : {torch.isnan(x).sum()}")
         #Add CLS token
-        cls_tokens = self.cls_token.expand(self.batch_size, -1, -1)
-        x = torch.cat((cls_tokens, x), dim=1)
+        if self.mode=='cls':
+            cls_tokens = self.cls_token.expand(self.batch_size, -1, -1)
+            x = torch.cat((cls_tokens, x), dim=1)
+        #print(f"X-before transposing: {x}")
         #Transpose (bsz, n_const, model_dim) -> (n_const, bsz, model_dim) for transformer input
         x = torch.transpose(x,0,1)
+        #print(f"X-before pos-encoding: {x}")
         #If pos_encoding = True, apply positional encoding
         if self.pos_encoding:
             x = self.pos_encoder(x * math.sqrt(self.model_dim))
         #Input to transformer encoder
-        x = self.transformer(x, mask=mask)
+        #print(f"X-before transformer: {x}")
+        #print(f"Is NAN? : {torch.isnan(x).sum()}")
+        #x = self.transformer(x, mask=mask)
+        x = self.transformer(x, src_key_padding_mask = mask)
+        #print(f"X-after trafo: {x}")
+        #print(f"Is NAN? : {torch.isnan(x).sum()}")
         #Only take [CLS] token and input into DINO head
-        x = x[0,...]
+        if self.mode == 'cls':
+            x = x[0,...]
+        elif self.mode == 'avg':
+            if self.use_mask:
+                expanded_mask = ~torch.transpose(pT_zero,0,1).unsqueeze(-1).expand(-1,-1, self.model_dim)
+                masked_x = x * expanded_mask
+                x_sum = masked_x.sum(dim=0)
+                denom = expanded_mask.sum(dim=0)
+                #Take the mean over the masked values (where there are particles, not masked in attention step)
+                x = x_sum / denom.clamp(min=1)
+                #Where there are no particles set mean to zero
+                x[denom == 0] = 0
+                #print(f"x-shape: {x.shape}")
+                #print(f"x: {x}")
+                #print(f"Is NAN? : {torch.isnan(x).sum()}")
+            else:
+                x = x.mean(dim=0)
+        elif self.mode == 'max':
+            x = x.max(dim=0)[0]
+        elif self.mode == 'flatten':
+            x = torch.transpose(x,0,1)
+            x = x.reshape(x.shape[0], -1)
+            x = self.flatten_output(x)
         #If downsize to lower dimension run throught the MLP
-        x = self.downsize(x)
+        if self.mode != 'flatten':
+            x = self.downsize(x)
         return x
     
     #Adding a classification head to the embedding (for pot. sup. cross entropy)
@@ -70,12 +110,15 @@ class TransformerEncoder(nn.Module):
         self.classification_head(x) """
 
     #For now the implementation does not use masking like in JetCLR, might be revisited later.
-    def forward(self, x):
-        x = self.representation(x)
+    def forward(self, x, x_before_augmentation):
+        x = self.representation(x, x_before_augmentation)
         x = self.dino_head(x)
+        #x = self.simclr_head(x)
+        #print(f"X-after DINO: {x}")
+        #print(f"Is NAN? : {torch.isnan(x).sum()}")
         return x
     
-    def make_mask(self, x):
+    def make_mask(self, x, mode):
         ''' Input: x w/ shape (bsz, n_const=19, n_feat=3)
             output: mask w/ pT zero (no particles) masked for attention w/ shape (bsz*n_heads, n_const, n_const)
                     where 0 is not masked and -np.inf is masked
@@ -88,10 +131,30 @@ class TransformerEncoder(nn.Module):
 
         mask = torch.zeros(pT_zero.size(0), n_const, n_const, device=x.device)
         mask[pT_zero] = -np.inf
-        #Add extra const for CLS token, not masked (0)
-        mask_with_cls = torch.zeros(pT_zero.size(0), n_const+1, n_const+1, device=x.device)
-        mask_with_cls[:,1:,1:] = mask
-        return mask_with_cls
+        if mode=='cls':
+            #Add extra const for CLS token, not masked (0)
+            mask_with_cls = torch.zeros(pT_zero.size(0), n_const+1, n_const+1, device=x.device)
+            mask_with_cls[:,1:,1:] = mask
+            return mask_with_cls, x[:,:,0] == 0
+        else:
+            return mask, x[:,:,0] == 0
+    
+    def make_src_key_padding_mask(self, x , mode):
+        ''' Input: x w/ shape (bsz, n_const=19, n_feat=3)
+            output: src_key_padding_mask w/ pT zero (no particles) masked for attention w/ shape (bsz, n_const)
+                    where False is not masked and True is masked
+        '''
+        bsz = x.shape[0]
+        n_const = x.shape[1]
+        pT_zero = x[:,:,0] == 0
+        if mode == 'cls':
+            mask_with_cls = torch.zeros(bsz, n_const+1, device=x.device).bool()
+            mask_with_cls[:,1:] = pT_zero
+            return mask_with_cls, pT_zero
+        else:
+            mask = torch.zeros(bsz, n_const, device=x.device).bool()
+            mask[...] = pT_zero
+            return mask, pT_zero
 
 
 #Import the projection head for the DINO loss from https://github.com/facebookresearch/dino/blob/main/vision_transformer.py
@@ -131,6 +194,18 @@ class DINOHead(nn.Module):
         x = self.last_layer(x)
         return x
     
+#Write a simpler, smaller head for SimCLR
+class SimCLRHead(nn.Module):
+    def __init__(self, in_dim, out_dim, hidden_dim):
+        super(SimCLRHead, self).__init__()
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.hidden_dim = hidden_dim
+        self.mlp = MLP(self.in_dim, self.out_dim, hidden_channels=self.hidden_dim)
+    
+    def forward(self, x):
+        return self.mlp(x)
+
 class PositionalEncoding(nn.Module):
 
     def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 1000):
@@ -221,7 +296,8 @@ if __name__ == "__main__":
         hidden_dim_dino_head=256,
         bottleneck_dim_dino_head=64,
         pos_encoding = True,
-        use_mask = False,
+        use_mask = True,
+        mode='cls',
     )
     #TransformerEncoder(**transformer_args_standard)
     plot_pos_encoding = PositionalEncoding(d_model=64)

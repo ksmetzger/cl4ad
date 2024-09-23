@@ -38,7 +38,7 @@ def rot_around_beamline(input_batch, device=None, rand_number=0, feat_dim=3, num
     Returns:
         permutated_batch: (batch_size, 57) permutated output
     '''
-    input_numpy = input_batch.numpy().reshape(-1,num_const,feat_dim)
+    input_numpy = input_batch.numpy().reshape(-1,num_const,feat_dim).copy()
     #Rotate the whole thing around the beamline (phi) at angle
     #np.random.seed(rand_number)
     #Iterate through the batch
@@ -64,11 +64,34 @@ def gaussian_resampling_pT(input_batch, device=None, rand_number=0, std_scale=0.
     Returns:
         resampled_batch: (batch_size, 57) permutated output
     '''
-    input_numpy = input_batch.numpy().reshape(-1,num_const,feat_dim)
+    input_numpy = input_batch.numpy().reshape(-1,num_const,feat_dim).copy()
     #Guassian resample the pT's of each constituent with mu=pT and std = pT * std_scale
     #np.random.seed(rand_number) #not sure if I should seed
     for x in input_numpy:
         x[:,0] = np.random.normal(loc=x[:,0], scale=np.absolute(x[:,0])*std_scale)
+
+    #Return a torch tensor on the given device and correct shape (-1,57)
+    resampled_batch = torch.from_numpy(input_numpy.reshape(-1,num_const,feat_dim)).to(dtype=torch.float32)
+
+    return resampled_batch
+
+def gaussian_resampling(input_batch, device=None, rand_number=0, std_scale=1.5, feat_dim=3, num_const=19):
+    '''
+    Applies the augmentation "gaussian resampling of pT" to events in a batch (torch tensor) and outputs a torch tensor with pT values rescaled within std.
+    Resample pT of constituents with mu=pT, std=pT*std_scale in the DELPHES dataset w/ structure: MET, 4x electron, 4x muon, 10x jet.
+    Each constituent has 3x features: transverse mom. pT, pseudorapidity eta, azimuthal angle phi.
+    Args:
+        input_batch: (batch_size, 57) flattened input
+        device: cuda or cpu depending on input
+        std_scale: scale multiplier for standard deviation std = pT * std_scale (default: 0.1)
+    Returns:
+        resampled_batch: (batch_size, 57) permutated output
+    '''
+    input_numpy = input_batch.numpy().reshape(-1,num_const,feat_dim).copy()
+    #Guassian resample the pT's of each constituent with mu=pT and std = pT * std_scale
+    #np.random.seed(rand_number) #not sure if I should seed
+    for x in input_numpy:
+        x[:,:] = np.random.normal(loc=x[:,:], scale=np.absolute(x[:,:])*std_scale)
 
     #Return a torch tensor on the given device and correct shape (-1,57)
     resampled_batch = torch.from_numpy(input_numpy.reshape(-1,num_const,feat_dim)).to(dtype=torch.float32)
@@ -87,7 +110,7 @@ def naive_masking(input_batch, device=None, rand_number=0, p=0.5, mask_full_part
         resampled_batch: (batch_size, 57) permutated output
     '''
     #np.random.seed(rand_number)
-    input_numpy = input_batch.numpy().reshape(-1)
+    input_numpy = input_batch.numpy().reshape(-1).copy()
     #Randomly (with prob. p) set parts of the input to 0.0 (mask/crop)
     if mask_full_particle:
         mask = np.random.choice([True, False], size=int(input_numpy.shape[0]/feat_dim), replace=True, p=[p, 1-p]).reshape(-1,num_const)
@@ -177,6 +200,8 @@ class Transform():
                 self.augmentations.append(gaussian_resampling_pT)
             elif augment == "rot_around_beamline":
                 self.augmentations.append(rot_around_beamline)
+            elif augment == 'gaussian_resampling':
+                self.augmentations.append(gaussian_resampling)
             else:
                 assert False
 

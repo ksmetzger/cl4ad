@@ -11,14 +11,16 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.tensorboard import SummaryWriter
-from torchsummary import summary
+#from torchsummary import summary
 
 import dino_loss
 from transformer import TransformerEncoder
 import augmentations
 import utils
+import h5py
+from sklearn.utils import shuffle
 
-def main(args):
+def main(args, train_idx, val_idx):
     '''
     Infastructure for training transformer with DINO (background specific and with anomalies)
     '''
@@ -32,8 +34,19 @@ def main(args):
     random.seed(0)
 
     #Dataset with signals and original divisions=[0.592,0.338,0.067,0.003]
-    dataset = np.load(os.path.join(os.getcwd(), args.dataset))
+    #dataset = np.load(os.path.join(os.getcwd(), args.dataset))
     #dataset = np.load("C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\"+args.dataset)
+    print(f"Using train folds: {train_idx}")
+    print(f"and using val fold: {val_idx}")
+    with h5py.File("/eos/user/k/kmetzger/test/dino/"+f'{args.dataset}', 'r') as f:
+        train_fold = np.concatenate([np.array(f[f'x_train_fold_{idx}'][...]) for idx in train_idx], axis=0)
+        labels_train_fold = np.concatenate([np.array(f[f'labels_train_fold_{idx}'][...]) for idx in train_idx], axis=0)
+        val_fold = np.array(f[f'x_train_fold_{val_idx}'][...])
+        labels_val_fold = np.array(f[f'labels_train_fold_{val_idx}'][...])
+        x_test = np.array(f['x_test'][...])
+        labels_test = np.array(f['labels_test'][...])
+    #Shuffle the train dataset
+    train_fold, labels_train_fold = shuffle(train_fold, labels_train_fold, random_state=0)
 
     if args.type == 'JetClass':
         feat_dim = 4
@@ -43,17 +56,17 @@ def main(args):
         num_const = 19
 
     train_data_loader = DataLoader(
-        TorchCLDataset(dataset['x_train'].reshape(-1,num_const,feat_dim), dataset['labels_train'].reshape(-1), device),
+        TorchCLDataset(train_fold.reshape(-1,num_const,feat_dim), labels_train_fold.reshape(-1), device),
         batch_size=args.batch_size,
         shuffle=True, drop_last=True)
 
     test_data_loader = DataLoader(
-        TorchCLDataset(dataset['x_test'].reshape(-1,num_const,feat_dim), dataset['labels_test'].reshape(-1), device),
+        TorchCLDataset(x_test.reshape(-1,num_const,feat_dim), labels_test.reshape(-1), device),
         batch_size=args.batch_size,
         shuffle=False)
 
     val_data_loader = DataLoader(
-        TorchCLDataset(dataset['x_val'].reshape(-1,num_const,feat_dim), dataset['labels_val'].reshape(-1), device),
+        TorchCLDataset(val_fold.reshape(-1,num_const,feat_dim), labels_val_fold.reshape(-1), device),
         batch_size=args.batch_size,
         shuffle=False, drop_last=True)
     
@@ -61,16 +74,18 @@ def main(args):
     transformer_args_standard = dict(
         input_dim=3, 
         model_dim=64, 
-        output_dim=args.out_dim,
-        embed_dim=6,   #Only change embed_dim without describing new transformer architecture
+        output_dim=64, 
+        embed_dim=32,
         n_heads=8, 
         dim_feedforward=256, 
         n_layers=4,
         hidden_dim_dino_head=256,
         bottleneck_dim_dino_head=64,
-        pos_encoding = True,
-        use_mask = True,
-    )
+        pos_encoding = False,
+        use_mask = False,
+        mode='flatten',
+        dropout=0,
+        )
     transformer_args_jetclass = dict(
         input_dim=4, 
         model_dim=128, 
@@ -107,7 +122,7 @@ def main(args):
         #Build student and teacher models and move them to device
         student = TransformerEncoder(**transformer_args_standard, norm_last_layer=args.norm_last_layer).to(device)
         teacher = TransformerEncoder(**transformer_args_standard).to(device)
-    summary(student, input_size=(19,3))
+    #summary(student, input_size=(19,3))
     # teacher and student start with the same weights
     teacher.load_state_dict(student.state_dict())
     # there is no backpropagation through the teacher, so no need for gradients
@@ -170,10 +185,10 @@ def main(args):
             view1 = transform(val).to(device=device)
             view2 = transform(val).to(device=device)
             
-            embedded_values_orig_student = student(view1)
-            embedded_values_aug_student = student(view2)
-            embedded_values_orig_teacher = teacher(view1)
-            embedded_values_aug_teacher = teacher(view2)
+            embedded_values_orig_student = student(view1, val.to(device))
+            embedded_values_aug_student = student(view2, val.to(device))
+            embedded_values_orig_teacher = teacher(view1, val.to(device))
+            embedded_values_aug_teacher = teacher(view2, val.to(device))
 
             teacher_output = torch.cat([embedded_values_orig_teacher,embedded_values_aug_teacher],dim=0)
             student_output = torch.cat([embedded_values_orig_student,embedded_values_aug_student],dim=0)
@@ -223,10 +238,10 @@ def main(args):
             view1 = transform(val).to(device=device)
             view2 = transform(val).to(device=device)
             
-            embedded_values_orig_student = student(view1)
-            embedded_values_aug_student = student(view2)
-            embedded_values_orig_teacher = teacher(view1)
-            embedded_values_aug_teacher = teacher(view2)
+            embedded_values_orig_student = student(view1, val.to(device))
+            embedded_values_aug_student = student(view2, val.to(device))
+            embedded_values_orig_teacher = teacher(view1, val.to(device))
+            embedded_values_aug_teacher = teacher(view2, val.to(device))
             teacher_output = torch.cat([embedded_values_orig_teacher,embedded_values_aug_teacher],dim=0)
             student_output = torch.cat([embedded_values_orig_student,embedded_values_aug_student],dim=0)
             loss = criterion(student_output, teacher_output, epoch_index-1)
@@ -241,14 +256,14 @@ def main(args):
         tb_writer.flush()
         return last_sim_loss
 
-    writer = SummaryWriter(os.path.join(os.getcwd(), "output/results"), comment="Similarity with standard DINOv1 settings", flush_secs=5)
+    writer = SummaryWriter("/eos/user/k/kmetzger/test/dino/output/results", comment="Similarity with standard DINOv1 settings", flush_secs=5)
 
     if args.train:
         train_losses = []
         val_losses = []
         start_time = time.time()
         #Initialize the Early Stopper
-        folder = "output/checkpoints"
+        folder = "/eos/user/k/kmetzger/test/dino/output/checkpoints"
         os.makedirs(folder, exist_ok=True)
         #EarlyStopper = EarlyStopping(patience=5, delta=0, path=args.model_name, verbose=True)
         print("Starting DINO training !")
@@ -280,8 +295,8 @@ def main(args):
                 break """
 
         #Save both networks for now
-        torch.save(student.state_dict(), os.path.join(os.getcwd(), "_student_" + args.model_name+ ".pth"))
-        torch.save(teacher.state_dict(), os.path.join(os.getcwd(), "_teacher_" + args.model_name + ".pth"))
+        #torch.save(student.state_dict(), os.path.join(os.getcwd(), "_student_" + args.model_name+ ".pth"))
+        #torch.save(teacher.state_dict(), os.path.join(os.getcwd(), "_teacher_" + args.model_name + ".pth"))
         #Add timing and print it
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
@@ -292,14 +307,14 @@ def main(args):
         plt.xlabel('iterations')
         plt.ylabel('Loss')
         plt.legend()
-        plt.savefig(os.path.join(os.getcwd(), 'output/loss.pdf'))
+        plt.savefig('/eos/user/k/kmetzger/test/dino/output/loss.pdf')
         
     else:
         #Evaluate using the teacher weights (backbone) as suggested by first author
         teacher.load_state_dict(torch.load(os.path.join(os.getcwd(), "output/runs66/_teacher_" + args.model_name), map_location=torch.device(device)))
         teacher.eval()
 
-        #Save the embedding output for the background and signal part
+        """ #Save the embedding output for the background and signal part
         embedding_dict = dict()
         train_data_loader = DataLoader(
         TorchCLDataset(dataset['x_train'].reshape(-1,num_const,feat_dim), dataset['labels_train'].reshape(-1), device),
@@ -316,7 +331,7 @@ def main(args):
                 embedding_dict[f"labels_{name}"] = dataset[f'labels_{name}']
 
         np.savez(args.output_filename, **embedding_dict)
-        print(f"Successfully saved embedding under {args.output_filename}")
+        print(f"Successfully saved embedding under {args.output_filename}") """
 
 class TorchCLDataset(Dataset):
   'Characterizes a dataset for PyTorch'
@@ -419,7 +434,7 @@ if __name__ == '__main__':
     parser.add_argument('--weight_decay_end', type=float, default=0.04, help="""Final value of the
         weight decay. We use a cosine schedule for WD and using a larger decay by
         the end of training improves performance for ViTs.""")
-    parser.add_argument("--lr", default=0.00005, type=float, help="""Learning rate at the end of
+    parser.add_argument("--lr", default=0.00025, type=float, help="""Learning rate at the end of
         linear warmup (highest LR used during training). The learning rate is linearly scaled
         with the batch size, and specified here for a reference batch size of 256.""")
     parser.add_argument("--warmup_epochs", default=5, type=int,
@@ -432,12 +447,23 @@ if __name__ == '__main__':
     parser.add_argument('--clip_grad', type=float, default=3.0, help="""Maximal parameter
         gradient norm if using gradient clipping. Clipping with norm .3 ~ 1.0 can
         help optimization for larger ViT architectures. 0 for disabling.""")
-    parser.add_argument('--norm_last_layer', default=True, type=utils.bool_flag,
+    parser.add_argument('--norm_last_layer', default=False, type=utils.bool_flag,
         help="""Whether or not to weight normalize the last layer of the DINO head.
         Not normalizing leads to better performance but can make the training unstable.
         In our experiments, we typically set this paramater to False with vit_small and True with vit_base.""")
     # parser.add_argument('--use_mask', default=True, type=utils.bool_flag,
     #     help="""Whether or not to mask the zero padded input (zero pT means no particle present) in the transformer encoder.""")
     parser.add_argument('--type', choices=('Delphes', 'JetClass'))
+    parser.add_argument('--k-fold', action='store_true')
     args = parser.parse_args()
-    main(args)
+    
+    #Do the k-folding (runs the main loop five times)
+    if args.k_fold:
+        for i in range(5):
+            train_idx = [0,1,2,3,4]
+            train_idx.remove(i)
+            val_idx = i
+            main(args, train_idx=train_idx, val_idx=val_idx)
+    else:
+        #To test just set the trainset to fold0 and valset to fold1
+        main(args, train_idx=[0], val_idx=1)

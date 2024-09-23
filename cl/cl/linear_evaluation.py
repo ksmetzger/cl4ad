@@ -41,6 +41,7 @@ def get_arguments():
     parser.add_argument('--head-name', type=str, default='output/head.pth')
     parser.add_argument('--backbone-name', type=str, default='output/backbone_finetuned.pth')
     parser.add_argument('--latent-dim', type=int, default=48)
+    parser.add_argument('--k-fold', type=int, default=-1)
     return parser
 
 
@@ -74,12 +75,22 @@ def main():
         feat_dim = (-1,512)
     elif args.arch == "TransformerEncoder_JetClass":
         feat_dim = (-1,128,4)
+    elif args.arch == "TransformerEncoder":
+        feat_dim = (-1,19,3)
     else:
         feat_dim = (-1,57)
 
     #Dataset with signals and original divisions=[0.592,0.338,0.067,0.003]
     #x_train, x_test, x_val, labels_train, labels_test, labels_val = load_data(args.dataset, feat_dim)
-    x_train, x_test, x_val, labels_train, labels_test, labels_val = load_data_nfolds(args.dataset, feat_dim)
+    #Load k-folding if k-fold != -1
+    if args.k_fold != -1:
+        train_idx = [0,1,2,3,4]
+        train_idx.remove(args.k_fold)
+        val_idx = args.k_fold
+    else:
+        train_idx = [0]
+        val_idx = 1
+    x_train, x_test, x_val, labels_train, labels_test, labels_val = load_data_nfolds(args.dataset, feat_dim, train_idx, val_idx)
 
     #Get transformations to apply in the training process
     transform = augmentations.Transform([], feat_dim)
@@ -105,7 +116,7 @@ def main():
         backbone = SimpleDense_small()
     elif args.arch == "SimpleDense_ADC":
         embed_dim = args.latent_dim
-        backbone = SimpleDense_ADC()
+        backbone = SimpleDense_ADC(args.latent_dim)
     elif args.arch == "SimpleDense_JetClass":
         embed_dim= args.latent_dim
         backbone = SimpleDense_JetClass(latent_dim=args.latent_dim)
@@ -125,6 +136,69 @@ def main():
         )
         backbone = TransformerEncoder(**transformer_args_jetclass)
         embed_dim = transformer_args_jetclass["embed_dim"]
+    elif args.arch == "TransformerEncoder":
+        transformer_args_standard = dict(
+        input_dim=3, 
+        model_dim=64, 
+        output_dim=64, 
+        embed_dim=6,
+        n_heads=8, 
+        dim_feedforward=256, 
+        n_layers=4,
+        hidden_dim_dino_head=256,
+        bottleneck_dim_dino_head=64,
+        pos_encoding = True,
+        use_mask = False,
+        mode='flatten',
+        dropout = 0,
+        )
+        transformer_args_half = dict(
+        input_dim=3, 
+        model_dim=32, 
+        output_dim=64, 
+        embed_dim=6,
+        n_heads=4, 
+        dim_feedforward=64, 
+        n_layers=3,
+        hidden_dim_dino_head=128,
+        bottleneck_dim_dino_head=32,
+        pos_encoding = False,
+        use_mask = False,
+        mode='flatten',
+        dropout=0,
+        )
+        transformer_args_tiny = dict(
+        input_dim=3, 
+        model_dim=16, 
+        output_dim=64, 
+        embed_dim=32,
+        n_heads=8, 
+        dim_feedforward=16, 
+        n_layers=2,
+        hidden_dim_dino_head=128,
+        bottleneck_dim_dino_head=32,
+        pos_encoding = True,
+        use_mask = True,
+        mode='flatten',
+        dropout=0,
+        )
+        transformer_args_large = dict(
+        input_dim=3, 
+        model_dim=128, 
+        output_dim=128, 
+        embed_dim=6,
+        n_heads=8, 
+        dim_feedforward=512, 
+        n_layers=6,
+        hidden_dim_dino_head=128,
+        bottleneck_dim_dino_head=64,
+        pos_encoding = True,
+        use_mask = False,
+        mode='flatten',
+        dropout=0,
+        )
+        backbone = TransformerEncoder(**transformer_args_standard)
+        embed_dim = transformer_args_standard["embed_dim"]
 
     else: warnings.warn("Model architecture is not listed")
 
@@ -187,7 +261,7 @@ def main():
         TorchCLDataset(x_test, labels_test, device),
         batch_size=args.batch_size,
         shuffle=False)
-    print("Length of the test Dataloader: ",len(val_data_loader))
+    print("Length of the test Dataloader: ",len(test_data_loader))
     #Loss function set to the standard CrossEntropyLoss
     criterion = nn.CrossEntropyLoss().to(device=device)
     
@@ -287,7 +361,6 @@ def accuracy(output, target, topk=(1,)):
         _, pred = output.topk(maxk, 1, True, True)
         pred = pred.t()
         correct = pred.eq(target.view(1, -1).expand_as(pred))
-
         res = []
         for k in topk:
             correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
@@ -305,6 +378,7 @@ def test_accuracy(dataloader, backbone, head, device):
     with torch.no_grad():
         for data, target in dataloader:
             output = head(backbone.representation(data.to(device)))
+            target = target.to(device)
             acc1, acc5, = accuracy(output, target, topk=(1,2))
             top1.update(acc1[0].item(), data.size(0))
             top5.update(acc5[0].item(), data.size(0))
@@ -344,12 +418,12 @@ def load_data(data_dir='', feat_dim=512):
     x_val, labels_val = dataset['x_val'].reshape(feat_dim), dataset['labels_val'].reshape(-1)
     return x_train, x_test, x_val, labels_train, labels_test, labels_val
 
-def load_data_nfolds(data_dir='', feat_dim=512):
+def load_data_nfolds(data_dir='', feat_dim=512, train_idx=[0], val_idx=1):
     with h5py.File(f'{data_dir}', 'r') as f:
-        train_fold = np.array(f['x_train_fold_0'][...])
-        labels_train_fold = np.array(f['labels_train_fold_0'][...])
-        val_fold = np.array(f['x_train_fold_1'][...])
-        labels_val_fold = np.array(f['labels_train_fold_1'][...])
+        train_fold = np.concatenate([np.array(f[f'x_train_fold_{idx}'][...]) for idx in train_idx], axis=0)
+        labels_train_fold = np.concatenate([np.array(f[f'labels_train_fold_{idx}'][...]) for idx in train_idx], axis=0)
+        val_fold = np.array(f[f'x_train_fold_{val_idx}'][...])
+        labels_val_fold = np.array(f[f'labels_train_fold_{val_idx}'][...])
         x_test = np.array(f['x_test'][...])
         labels_test = np.array(f['labels_test'][...])
     x_train, labels_train = train_fold.reshape(feat_dim), labels_train_fold.reshape(-1)
@@ -376,8 +450,8 @@ class TorchCLDataset(Dataset):
   def __init__(self, features, labels, device):
         'Initialization'
         self.device = device
-        self.mean = np.mean(features)
-        self.std = np.std(features)
+        #self.mean = np.mean(features)
+        #self.std = np.std(features)
         self.features = torch.from_numpy(features).to(dtype=torch.float32)
         self.labels = torch.from_numpy(labels).to(dtype=torch.float32)
 

@@ -8,7 +8,7 @@ import random
 import torch
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.tensorboard import SummaryWriter
-from torchsummary import summary
+#from torchsummary import summary
 
 import losses
 from models import CVAE, SimpleDense, DeepSets, SimpleDense_small, SimpleDense_JetClass, CVAE_JetClass
@@ -17,8 +17,9 @@ import augmentations
 import math
 import h5py
 from tqdm import tqdm
+from sklearn.utils import shuffle
 
-def main(args):
+def main(args, train_idx, val_idx):
     '''
     Infastructure for training CVAE (background specific and with anomalies)
     '''
@@ -33,13 +34,17 @@ def main(args):
 
     #Dataset with signals and original divisions=[0.592,0.338,0.067,0.003]
     #dataset = np.load("/eos/user/k/kmetzger/test/dino/" +args.dataset)
-    with h5py.File("/eos/user/k/kmetzger/test/dino/"+ f'{args.dataset}', 'r') as f:
-        train_fold = np.array(f['x_train_fold_0'][...])
-        labels_train_fold = np.array(f['labels_train_fold_0'][...])
-        val_fold = np.array(f['x_train_fold_1'][...])
-        labels_val_fold = np.array(f['labels_train_fold_1'][...])
+    print(f"Using train folds: {train_idx}")
+    print(f"and using val fold: {val_idx}")
+    with h5py.File(f'{args.dataset}', 'r') as f:
+        train_fold = np.concatenate([np.array(f[f'x_train_fold_{idx}'][...]) for idx in train_idx], axis=0)
+        labels_train_fold = np.concatenate([np.array(f[f'labels_train_fold_{idx}'][...]) for idx in train_idx], axis=0)
+        val_fold = np.array(f[f'x_train_fold_{val_idx}'][...])
+        labels_val_fold = np.array(f[f'labels_train_fold_{val_idx}'][...])
         x_test = np.array(f['x_test'][...])
         labels_test = np.array(f['labels_test'][...])
+    #Shuffle the train dataset
+    train_fold, labels_train_fold = shuffle(train_fold, labels_train_fold, random_state=0)
 
     feat_dim = 57
     if args.type == 'JetClass' or args.type == 'JetClass_Transformer':
@@ -53,7 +58,7 @@ def main(args):
         feat_std = np.std(train_fold.reshape(-1, feat_dim), axis=0),
     )
     #Initialize transform (empty list: None)
-    transform = augmentations.Transform(["gaussian_resampling_pT"], feat_dim)
+    transform = augmentations.Transform(["naive_masking"], feat_dim)
     
     train_data_loader = DataLoader(
         TorchCLDataset(train_fold.reshape(-1,feat_dim), labels_train_fold.reshape(-1), device),
@@ -98,18 +103,64 @@ def main(args):
         input_dim=3, 
         model_dim=64, 
         output_dim=64, 
-        embed_dim=12,
+        embed_dim=6,
         n_heads=8, 
         dim_feedforward=256, 
         n_layers=4,
         hidden_dim_dino_head=256,
         bottleneck_dim_dino_head=64,
         pos_encoding = True,
+        use_mask = False,
+        mode='flatten',
+        dropout=0,
+        )
+        transformer_args_half = dict(
+        input_dim=3, 
+        model_dim=32, 
+        output_dim=64, 
+        embed_dim=6,
+        n_heads=4, 
+        dim_feedforward=64, 
+        n_layers=3,
+        hidden_dim_dino_head=128,
+        bottleneck_dim_dino_head=32,
+        pos_encoding = False,
+        use_mask = False,
+        mode='flatten',
+        dropout=0,
+        )
+        transformer_args_tiny = dict(
+        input_dim=3, 
+        model_dim=16, 
+        output_dim=64, 
+        embed_dim=32,
+        n_heads=8, 
+        dim_feedforward=16, 
+        n_layers=2,
+        hidden_dim_dino_head=128,
+        bottleneck_dim_dino_head=32,
+        pos_encoding = True,
         use_mask = True,
-        mode='cls',
+        mode='flatten',
+        dropout=0,
+        )
+        transformer_args_large = dict(
+        input_dim=3, 
+        model_dim=128, 
+        output_dim=128, 
+        embed_dim=6,
+        n_heads=8, 
+        dim_feedforward=512, 
+        n_layers=6,
+        hidden_dim_dino_head=128,
+        bottleneck_dim_dino_head=64,
+        pos_encoding = False,
+        use_mask = False,
+        mode='flatten',
+        dropout=0,
         )
         model = TransformerEncoder(**transformer_args_standard).to(device)
-        summary(model, input_size=(57,))
+        #summary(model, input_size=(57,))
 
     # criterion = losses.SimCLRLoss()
     #criterion = losses.VICRegLoss(inv_weight=10, var_weight=25, cov_weight=10)
@@ -124,7 +175,8 @@ def main(args):
         optimizer, schedulers=[scheduler_1, scheduler_2, scheduler_3], milestones=[5, 20]) """
     #Version 2 schedule
     #optimizer = torch.optim.SGD(model.parameters(), lr=0, weight_decay=1e-3)
-    optimizer = LARS(model.parameters(), lr=0, weight_decay=1e-6, weight_decay_filter=exclude_bias_and_norm, lars_adaptation_filter=exclude_bias_and_norm)
+    #optimizer = LARS(model.parameters(), lr=0, weight_decay=1e-6, weight_decay_filter=exclude_bias_and_norm, lars_adaptation_filter=exclude_bias_and_norm)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0, weight_decay=1e-6)
 
     def train_one_epoch(epoch_index, tb_writer):
         running_sim_loss = 0.
@@ -144,8 +196,8 @@ def main(args):
                     embedded_values_orig = model(transform(val).reshape(-1,128,4).to(device=device))
                     embedded_values_aug = model(transform(val).reshape(-1,128,4).to(device=device))
             else:
-                embedded_values_orig = model(transform(val).reshape(-1,19,3).to(device=device))
-                embedded_values_aug = model(transform(val).reshape(-1,19,3).to(device=device))
+                embedded_values_orig = model(transform(val).reshape(-1,19,3).to(device=device), val.reshape(-1,19,3).to(device=device))
+                embedded_values_aug = model(transform(val).reshape(-1,19,3).to(device=device), val.reshape(-1,19,3).to(device=device))
             #embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
             #embedded_values_orig = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0))
             #embedded_values_aug = model(first_val_repeated)
@@ -165,13 +217,15 @@ def main(args):
             #similar_embedding_loss = criterion(feature, labels.reshape(-1))
 
             optimizer.zero_grad()
+            if args.clip_grad:
+                clip_gradients(model, args.clip_grad)
             similar_embedding_loss.backward()
             optimizer.step()
             # Gather data and report
             running_sim_loss += similar_embedding_loss.item()
             if idx % 500 == 0:
                 last_sim_loss = running_sim_loss / 500
-                tb_x = epoch_index * len(train_data_loader) + idx
+                tb_x = (epoch_index-1) * len(train_data_loader) + idx
                 tb_writer.add_scalar('SimLoss/train', last_sim_loss, tb_x)
                 running_sim_loss = 0.
             loop.set_postfix(train_loss=last_sim_loss)
@@ -194,8 +248,8 @@ def main(args):
                     embedded_values_orig = model(transform(val).reshape(-1,128,4).to(device=device))
                     embedded_values_aug = model(transform(val).reshape(-1,128,4).to(device=device))
                 else:
-                    embedded_values_orig = model(transform(val).reshape(-1,19,3).to(device=device))
-                    embedded_values_aug = model(transform(val).reshape(-1,19,3).to(device=device))
+                    embedded_values_orig = model(transform(val).reshape(-1,19,3).to(device=device), val.reshape(-1,19,3).to(device=device))
+                    embedded_values_aug = model(transform(val).reshape(-1,19,3).to(device=device), val.reshape(-1,19,3).to(device=device))
                 #embedded_values_orig = model(val)
                 #embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
                 #embedded_values_aug = model(first_val_repeated)
@@ -218,20 +272,20 @@ def main(args):
                 running_sim_loss += similar_embedding_loss.item()
                 if idx % 50 == 0:
                     last_sim_loss = running_sim_loss / 50
-                    tb_x = epoch_index * len(val_data_loader) + idx + 1
+                    tb_x = (epoch_index-1) * len(val_data_loader) + idx + 1
                     tb_writer.add_scalar('SimLoss/val', last_sim_loss, tb_x)
                     tb_writer.flush()
                     running_sim_loss = 0.
         tb_writer.flush()
         return last_sim_loss
 
-    writer = SummaryWriter("/eos/user/k/kmetzger/test/cl/output/results", comment="Similarity with LR=1e-3", flush_secs=5)
+    writer = SummaryWriter("output/results", comment="Similarity with LR=1e-3", flush_secs=5)
 
     if args.train:
         train_losses = []
         val_losses = []
         #Initialize the Early Stopper
-        folder = "/eos/user/k/kmetzger/test/cl/output/checkpoints"
+        folder = "output/checkpoints"
         os.makedirs(folder, exist_ok=True)
         #EarlyStopper = EarlyStopping(patience=5, delta=0, path=os.path.join(folder,args.model_name), verbose=True)
         start_time = time.time()
@@ -259,7 +313,7 @@ def main(args):
 
             #Save checkpoint
             path = os.path.join(folder, args.model_name)
-            torch.save(model.state_dict(), f"{path}vae_ep_{epoch}.pth")
+            torch.save(model.state_dict(), f"{path}_valfold_{val_idx}_vae_ep_{epoch}.pth")
 
             """ #Check whether to EarlyStop
             EarlyStopper(avg_val_loss, model, epoch)
@@ -278,7 +332,7 @@ def main(args):
         plt.xlabel('iterations')
         plt.ylabel('Loss')
         plt.legend()
-        plt.savefig("/eos/user/k/kmetzger/test/cl/output/loss.pdf")
+        plt.savefig(f"output/loss_valfold_{val_idx}.pdf")
         
     else:
         model.load_state_dict(torch.load(args.model_name, map_location=torch.device(device)))
@@ -441,6 +495,17 @@ class EarlyStopping:
         file_path = f"{self.path}_ep_{epoch}.pth"
         torch.save(model.state_dict(), file_path)
 
+def clip_gradients(model, clip):
+    #norms = []
+    for name, p in model.named_parameters():
+        if p.grad is not None:
+            param_norm = p.grad.data.norm(2)
+            #norms.append(param_norm.item())
+            clip_coef = clip / (param_norm + 1e-6)
+            if clip_coef < 1:
+                p.grad.data.mul_(clip_coef)
+    #return norms
+
 if __name__ == '__main__':
     # Parses terminal command
     parser = ArgumentParser()
@@ -450,7 +515,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--epochs', type=int, default=1)
     parser.add_argument('--batch-size', type=int, default=1024)
-    parser.add_argument('--loss-temp', type=float, default=0.07)
+    parser.add_argument('--loss-temp', type=float, default=0.8)
     parser.add_argument('--model-name', type=str, default='')
     parser.add_argument('--scaling-filename', type=str)
     parser.add_argument('--output-filename', type=str, default='embedding.npz')
@@ -459,6 +524,19 @@ if __name__ == '__main__':
     parser.add_argument('--latent-dim', type=int, default=48)
     parser.add_argument('--train', action='store_true')
     parser.add_argument('--type', choices=('Delphes', 'JetClass', 'JetClass_Transformer'))
+    parser.add_argument('--clip_grad', type=float, default=0, help="""Maximal parameter
+        gradient norm if using gradient clipping. Clipping with norm .3 ~ 1.0 can
+        help optimization for larger ViT architectures. 0 for disabling.""")
+    parser.add_argument('--k-fold', action='store_true')
 
     args = parser.parse_args()
-    main(args)
+    #Do the k-folding (runs the main loop five times)
+    if args.k_fold:
+        for i in range(5):
+            train_idx = [0,1,2,3,4]
+            train_idx.remove(i)
+            val_idx = i
+            main(args, train_idx=train_idx, val_idx=val_idx)
+    else:
+        #To test just set the trainset to fold0 and valset to fold1
+        main(args, train_idx=[0], val_idx=1)

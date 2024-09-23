@@ -13,6 +13,7 @@ import time
 import json
 import sys
 import random
+import h5py
 
 '''Linear evaluation of self-supervised embedding in order to calculate top1/top5 accuracies as
    standard in literature and leaderboards. Inspired by https://github.com/facebookresearch/vicreg/blob/main/evaluate.py.'''
@@ -35,6 +36,7 @@ def get_arguments():
     parser.add_argument("--percent", default=1, type=int, choices=(1,10), help="If finetune, choose percentage of labeled train data the model is finetuned on.")
     parser.add_argument('--head-name', type=str, default='output/head.pth')
     parser.add_argument('--backbone-name', type=str, default='output/backbone_finetuned.pth')
+    parser.add_argument('--k-fold', type=int, default=-1)
     return parser
 
 
@@ -69,23 +71,34 @@ def main():
         feat_dim = 3
 
     #Dataset with signals and original divisions=[0.592,0.338,0.067,0.003]
-    x_train, x_test, x_val, labels_train, labels_test, labels_val = load_data("C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\"+args.dataset, feat_dim, num_const)
+    #x_train, x_test, x_val, labels_train, labels_test, labels_val = load_data("C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\"+args.dataset, feat_dim, num_const)
+    #Load k-folding if k-fold != -1
+    if args.k_fold != -1:
+        train_idx = [0,1,2,3,4]
+        train_idx.remove(args.k_fold)
+        val_idx = args.k_fold
+    else:
+        train_idx = [0]
+        val_idx = 1
+    x_train, x_test, x_val, labels_train, labels_test, labels_val = load_data_nfolds(args.dataset, feat_dim, num_const, train_idx, val_idx)
 
     #Get pretrained model
     if args.arch == "TransformerEncoder":
         #Transformer + DINO head architecture args
         transformer_args_standard = dict(
-            input_dim=3, 
-            model_dim=64, 
-            output_dim=64,
-            embed_dim=64, 
-            n_heads=8, 
-            dim_feedforward=256, 
-            n_layers=4,
-            hidden_dim_dino_head=256,
-            bottleneck_dim_dino_head=64,
-            pos_encoding=True,
-            use_mask = False,
+        input_dim=3, 
+        model_dim=64, 
+        output_dim=64, 
+        embed_dim=32,
+        n_heads=8, 
+        dim_feedforward=256, 
+        n_layers=4,
+        hidden_dim_dino_head=256,
+        bottleneck_dim_dino_head=64,
+        pos_encoding = False,
+        use_mask = False,
+        mode='flatten',
+        dropout=0,
         )
         transformer_args_small = dict(
         input_dim=3, 
@@ -191,7 +204,7 @@ def main():
         for step, (data, target) in enumerate(train_data_loader, start = epoch*len(train_data_loader)):
             target = target.long().to(device)
             #output = head(backbone.representation(augmentations.naive_masking(data, device=device, rand_number=0))) #Train with the same augmentations as the contrastive objective
-            output = head(backbone.representation(data.to(device)))
+            output = head(backbone.representation(data.to(device), data.to(device)))
             loss = criterion(output, target.reshape(-1))
             optimizer.zero_grad()
             loss.backward()
@@ -215,8 +228,8 @@ def main():
         with torch.no_grad():
             for data, target in val_data_loader:
                 target = target.to(device)
-                output = head(backbone.representation(data.to(device)))
-                acc1, acc5, = accuracy(output, target, topk=(1,5))
+                output = head(backbone.representation(data.to(device), data.to(device)))
+                acc1, acc5, = accuracy(output, target, topk=(1,2))
                 top1.update(acc1[0].item(), data.size(0))
                 top5.update(acc5[0].item(), data.size(0))
 
@@ -246,7 +259,7 @@ def main():
         print(f"Classification head + finetuned backbone (with {args.percent}% labeled data) successfully saved!")
     
     #Print the penultimate performance also on the test dataset to confirm the changes made based on the accuracies of the validation dataset
-    top1, top5 = test_accuracy(test_data_loader, backbone, head)
+    top1, top5 = test_accuracy(test_data_loader, backbone, head, device)
     stats_test = dict(
         acc1_on_testset = top1,
         acc5_on_testset = top5,
@@ -272,7 +285,7 @@ def accuracy(output, target, topk=(1,)):
         return res
     
 #Confirm the accuracy on the test set
-def test_accuracy(dataloader, backbone, head):
+def test_accuracy(dataloader, backbone, head, device):
     #Evaluate
     backbone.eval()
     head.eval()
@@ -281,8 +294,9 @@ def test_accuracy(dataloader, backbone, head):
     top5 = AverageMeter("Acc@5")
     with torch.no_grad():
         for data, target in dataloader:
-            output = head(backbone.representation(data))
-            acc1, acc5, = accuracy(output, target, topk=(1,5))
+            output = head(backbone.representation(data.to(device), data.to(device)))
+            target = target.to(device)
+            acc1, acc5, = accuracy(output, target, topk=(1,2))
             top1.update(acc1[0].item(), data.size(0))
             top5.update(acc5[0].item(), data.size(0))
     best_acc.top1 = max(best_acc.top1, top1.avg)
@@ -321,13 +335,26 @@ def load_data(data_dir='', feat_dim=3, num_const=19):
     x_val, labels_val = dataset['x_val'].reshape(-1,num_const,feat_dim), dataset['labels_val'].reshape(-1)
     return x_train, x_test, x_val, labels_train, labels_test, labels_val
 
+def load_data_nfolds(data_dir='', feat_dim=3, num_const=19, train_idx=[0], val_idx=1):
+    with h5py.File("/eos/user/k/kmetzger/test/dino/"+f'{data_dir}', 'r') as f:
+        train_fold = np.concatenate([np.array(f[f'x_train_fold_{idx}'][...]) for idx in train_idx], axis=0)
+        labels_train_fold = np.concatenate([np.array(f[f'labels_train_fold_{idx}'][...]) for idx in train_idx], axis=0)
+        val_fold = np.array(f[f'x_train_fold_{val_idx}'][...])
+        labels_val_fold = np.array(f[f'labels_train_fold_{val_idx}'][...])
+        x_test = np.array(f['x_test'][...])
+        labels_test = np.array(f['labels_test'][...])
+    x_train, labels_train = train_fold.reshape(-1,num_const,feat_dim), labels_train_fold.reshape(-1)
+    x_test, labels_test = x_test.reshape(-1,num_const,feat_dim), labels_test.reshape(-1)
+    x_val, labels_val = val_fold.reshape(-1,num_const,feat_dim), labels_val_fold.reshape(-1)
+    return x_train, x_test, x_val, labels_train, labels_test, labels_val
+
 class TorchCLDataset(Dataset):
   'Characterizes a dataset for PyTorch'
   def __init__(self, features, labels, device):
         'Initialization'
         self.device = device
-        self.mean = np.mean(features)
-        self.std = np.std(features)
+        #self.mean = np.mean(features)
+        #self.std = np.std(features)
         self.features = torch.from_numpy(features).to(dtype=torch.float32)
         self.labels = torch.from_numpy(labels).to(dtype=torch.float32)
 

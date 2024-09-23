@@ -17,8 +17,9 @@ import augmentations
 import math
 import h5py
 from tqdm import tqdm
+from sklearn.utils import shuffle
 
-def main(args):
+def main(args, train_idx, val_idx):
     '''
     Infastructure for training CVAE (background specific and with anomalies)
     '''
@@ -33,13 +34,17 @@ def main(args):
 
     #Dataset with signals and original divisions=[0.592,0.338,0.067,0.003]
     #dataset = np.load(args.dataset)
+    print(f"Using train folds: {train_idx}")
+    print(f"and using val fold: {val_idx}")
     with h5py.File(f'{args.dataset}', 'r') as f:
-        train_fold = np.array(f['x_train_fold_0'][...])
-        labels_train_fold = np.array(f['labels_train_fold_0'][...])
-        val_fold = np.array(f['x_train_fold_1'][...])
-        labels_val_fold = np.array(f['labels_train_fold_1'][...])
+        train_fold = np.concatenate([np.array(f[f'x_train_fold_{idx}'][...]) for idx in train_idx], axis=0)
+        labels_train_fold = np.concatenate([np.array(f[f'labels_train_fold_{idx}'][...]) for idx in train_idx], axis=0)
+        val_fold = np.array(f[f'x_train_fold_{val_idx}'][...])
+        labels_val_fold = np.array(f[f'labels_train_fold_{val_idx}'][...])
         x_test = np.array(f['x_test'][...])
         labels_test = np.array(f['labels_test'][...])
+    #Shuffle the train dataset
+    train_fold, labels_train_fold = shuffle(train_fold, labels_train_fold, random_state=0)
 
     feat_dim = 57
     if args.type == 'JetClass' or args.type == 'JetClass_Transformer':
@@ -53,7 +58,7 @@ def main(args):
         feat_std = np.std(train_fold.reshape(-1, feat_dim), axis=0),
     )
     #Initialize transform (empty list: None)
-    transform = augmentations.Transform(["naive_masking"], feat_dim)
+    transform = augmentations.Transform(["detector_crop","rot_around_beamline"], feat_dim)
     
     train_data_loader = DataLoader(
         TorchCLDataset(train_fold.reshape(-1,feat_dim), labels_train_fold.reshape(-1), device),
@@ -71,8 +76,8 @@ def main(args):
         shuffle=False)
 
     if args.type == 'JetClass':
-        #model = SimpleDense_JetClass(args.latent_dim).to(device)
-        model = CVAE_JetClass(args.latent_dim).to(device)
+        model = SimpleDense_JetClass(args.latent_dim).to(device)
+        #model = CVAE_JetClass(args.latent_dim).to(device)
         summary(model, input_size=(512,))
     elif args.type == 'JetClass_Transformer':
         transformer_args_jetclass = dict(
@@ -98,8 +103,8 @@ def main(args):
         summary(model, input_size=(57,))
 
     # criterion = losses.SimCLRLoss()
-    criterion = losses.VICRegLoss(inv_weight=10, var_weight=25, cov_weight=10)
-    #criterion = losses.SimCLRloss_nolabels_fast(temperature=args.loss_temp, base_temperature=args.loss_temp, contrast_mode='one')
+    #criterion = losses.VICRegLoss(inv_weight=10, var_weight=25, cov_weight=10)
+    criterion = losses.SimCLRloss_nolabels_fast(temperature=args.loss_temp, base_temperature=args.loss_temp, contrast_mode='one')
     #Standard schedule
     """ optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-3) #Adams pytorch impl. of weight decay is equiv. to the L2 penalty.
     scheduler_1 = torch.optim.lr_scheduler.ConstantLR(optimizer, total_iters=5)
@@ -132,6 +137,7 @@ def main(args):
             else:
                 embedded_values_orig = model(transform(val).to(device=device))
                 embedded_values_aug = model(transform(val).to(device=device))
+                #pass
             #embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
             #embedded_values_orig = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0))
             #embedded_values_aug = model(first_val_repeated)
@@ -139,13 +145,13 @@ def main(args):
             #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
             #embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
             #embedded_values_aug = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42))
-            #feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
-            similar_embedding_loss = criterion(embedded_values_orig, embedded_values_aug)
+            feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
+            #similar_embedding_loss = criterion(embedded_values_orig, embedded_values_aug)
 
-            #similar_embedding_loss = criterion(feature)
+            similar_embedding_loss = criterion(feature)
             
             #For supervised input, only give one view
-            #embedded_values_orig = model(val)
+            #embedded_values_orig = model(val.to(device))
             #feature = embedded_values_orig.unsqueeze(dim=1)
 
             #similar_embedding_loss = criterion(feature, labels.reshape(-1))
@@ -182,6 +188,7 @@ def main(args):
                 else:
                     embedded_values_orig = model(transform(val).to(device=device))
                     embedded_values_aug = model(transform(val).to(device=device))
+                    #pass
                 #embedded_values_orig = model(val)
                 #embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
                 #embedded_values_aug = model(first_val_repeated)
@@ -190,13 +197,13 @@ def main(args):
                 #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
                 #embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
                 #embedded_values_aug = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42))
-                #feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
-                similar_embedding_loss = criterion(embedded_values_orig, embedded_values_aug)
+                feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
+                #similar_embedding_loss = criterion(embedded_values_orig, embedded_values_aug)
                 
-                #similar_embedding_loss = criterion(feature)
+                similar_embedding_loss = criterion(feature)
 
                 #For supervised input, only give one view
-                #embedded_values_orig = model(val)
+                #embedded_values_orig = model(val.to(device))
                 #feature = embedded_values_orig.unsqueeze(dim=1)
                 
                 #similar_embedding_loss = criterion(feature, labels.reshape(-1))
@@ -219,14 +226,14 @@ def main(args):
         #Initialize the Early Stopper
         folder = "output\checkpoints"
         os.makedirs(folder, exist_ok=True)
-        EarlyStopper = EarlyStopping(patience=5, delta=0, path=os.path.join(folder,args.model_name), verbose=True)
+        #EarlyStopper = EarlyStopping(patience=8, delta=0, path=os.path.join(folder,args.model_name + f"_valfold_{val_idx}"), verbose=True)
         start_time = time.time()
 
         for epoch in range(1, args.epochs+1):
             print(f'EPOCH {epoch}')
             temp_time= time.time()
             #Adjust the learning rate with Version 2 schedule (see OneNote)
-            lr = adjust_learning_rate(args, 10, epoch, optimizer, base_lr=0.025)
+            lr = adjust_learning_rate(args, 10, epoch, optimizer, base_lr=0.2)
             print("current Learning rate: ", lr)
             writer.add_scalar('Learning_rate', lr, epoch)
             # Gradient tracking
@@ -243,14 +250,14 @@ def main(args):
             print(f"Train/Val Sim Loss after epoch: {avg_train_loss:.4f}/{avg_val_loss:.4f}")
             print(f"taking {temp_time:.1f}s to complete")
 
-            # #Save checkpoint
-            # path = os.path.join(folder, args.model_name)
-            # torch.save(model.state_dict(), f"{path}_vae_ep_{epoch}.pth")
+            #Save checkpoint
+            path = os.path.join(folder, args.model_name)
+            torch.save(model.state_dict(), f"{path}_valfold_{val_idx}_vae_ep_{epoch}.pth")
 
-            #Check whether to EarlyStop
+            """ #Check whether to EarlyStop
             EarlyStopper(avg_val_loss, model, epoch)
             if EarlyStopper.early_stop:
-                break
+                break """
 
             #scheduler.step()
         writer.flush()
@@ -264,7 +271,7 @@ def main(args):
         plt.xlabel('iterations')
         plt.ylabel('Loss')
         plt.legend()
-        plt.savefig('output/loss.pdf')
+        plt.savefig(f'output/loss_valfold_{val_idx}.pdf')
         
     else:
         model.load_state_dict(torch.load(args.model_name, map_location=torch.device(device)))
@@ -346,7 +353,7 @@ def exclude_bias_and_norm(p):
 
 def adjust_learning_rate(args, warmup_epochs ,epoch, optimizer, base_lr):
         max_epochs = args.epochs
-        base_lr = base_lr * args.batch_size / 256 #Scale like suggested by VICReg for base_lr = 0.2 (SimCLR has base_lr = 0.3)
+        base_lr = base_lr * args.batch_size / 256 #Scale like suggested by VICReg for base_lr = 0.4 (SimCLR has base_lr = 0.3)
         if epoch <= warmup_epochs:
             lr = base_lr * epoch / warmup_epochs #Linear warmup
         else:
@@ -445,6 +452,17 @@ if __name__ == '__main__':
     parser.add_argument('--latent-dim', type=int, default=48)
     parser.add_argument('--train', action='store_true')
     parser.add_argument('--type', choices=('Delphes', 'JetClass', 'JetClass_Transformer'))
+    parser.add_argument('--k-fold', action='store_true')
+
 
     args = parser.parse_args()
-    main(args)
+    #Do the k-folding (runs the main loop five times)
+    if args.k_fold:
+        for i in range(5):
+            train_idx = [0,1,2,3,4]
+            train_idx.remove(i)
+            val_idx = i
+            main(args, train_idx=train_idx, val_idx=val_idx)
+    else:
+        #To test just set the trainset to fold0 and valset to fold1
+        main(args, train_idx=[0], val_idx=1)

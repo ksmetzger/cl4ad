@@ -158,7 +158,7 @@ class SimpleDense_JetClass(torch.nn.Module):
             nn.BatchNorm1d(64),
             nn.LeakyReLU(),
             nn.Linear(64,self.expanded_dim),
-            nn.BatchNorm1d(self.expanded_dim),
+            #nn.BatchNorm1d(self.expanded_dim),
         )
     def representation(self, x):
         y = self.encoder(x)

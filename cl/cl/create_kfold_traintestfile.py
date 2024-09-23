@@ -98,6 +98,181 @@ class ADC_Dataset():
         with h5py.File(f'{args.output_filename}.hdf5', 'r') as f:
             print(list(f.keys()))
 
+class JetClass_Dataset():
+    """Split the JetClass train/val datasets into k-folds (n=5)"""
+    def __init__(self, args):
+        self.data = self.load_dataset(args)
+        self.k_folded_data = self.kfold_dataset(n_folds=5, data=self.data)
+
+    def load_dataset(self, args):
+        dataset = np.load(args.background_dataset)
+        print(f"Dataset files loaded: {dataset.files}")
+        data_dict = {
+            "x_train": dataset["x_train"],
+            "x_val": dataset["x_val"],
+            "x_test": dataset["x_test"],
+            "labels_train": dataset["labels_train"],
+            "labels_val": dataset["labels_val"],
+            "labels_test": dataset["labels_test"],
+        }
+        return data_dict
+    def kfold_dataset(self, n_folds, data):
+        k_folded_dict = {
+            "x_test": data["x_test"],
+            "labels_test": data["labels_test"]
+        }
+        #Combine the test and val set as that is handled by the k-folding!
+        data["x_combined"] = np.concatenate((data["x_train"], data["x_val"]), axis=0)
+        data["labels_combined"] = np.concatenate((data["labels_train"], data["labels_val"]), axis=0)
+        data["x_combined"], data["labels_combined"] = shuffle(data["x_combined"],data["labels_combined"], random_state=args.seed)
+        idx = np.random.choice(n_folds, size=len(data["labels_combined"]), replace=True)
+        for i in range(n_folds):
+            mask = (idx == i)
+            k_folded_dict[f"x_train_fold_{i}"] = data["x_combined"][mask]
+            k_folded_dict[f"labels_train_fold_{i}"] = data["labels_combined"][mask]
+        return k_folded_dict
+    
+    def save_as_h5(self):
+        # Open HDF5 file and write in the data_dict structure and info
+        with h5py.File(f'{args.output_filename}.hdf5', 'w') as f:
+            for dataset_name in self.k_folded_data:
+                dset = f.create_dataset(dataset_name, data=self.k_folded_data[dataset_name])
+        #Check if it is saved
+        with h5py.File(f'{args.output_filename}.hdf5', 'r') as f:
+            print(list(f.keys()))
+
+
+class ADC_Signal():
+    """Prepare the signals from the ADC_Delphes dataset for injection"""
+    def __init__(self, args):
+        self.data = self.load_dataset(args)
+        self.data_w_labels = self.create_labels(self.data)
+        self.preprocessed_data = self.preprocess(self.data_w_labels)
+
+    def load_dataset(self, args):
+        dataset = np.load(args.background_dataset)
+        print(f"Dataset files loaded: {dataset.files}")
+        data_dict = {
+            "leptoquark": dataset["leptoquark"],
+            "ato4l": dataset["ato4l"],
+            "hChToTauNu": dataset["hChToTauNu"],
+            "hToTauTau": dataset["hToTauTau"],
+        }
+        return data_dict
+
+    def create_labels(self, data):
+        for i_key, key in enumerate(self.data.copy().keys()):
+            anomaly_dataset_i = self.data[key][:]
+            print(f"making datasets for {key} anomaly with shape {anomaly_dataset_i.shape}")
+
+            labels = np.ones(anomaly_dataset_i.shape[0])*(i_key+4)
+            data[f"{key}_labels"] = labels
+        #print(data["hToTauTau_labels"].shape)
+        print(data.keys())
+        return data
+    
+    def preprocess(self, data):
+        data_dict_preprocessed = {
+            "leptoquark": zscore_preprocess(data["leptoquark"], train=False, scaling_file="scaling_file.npz"),
+            "ato4l": zscore_preprocess(data["ato4l"], train=False, scaling_file="scaling_file.npz"),
+            "hChToTauNu": zscore_preprocess(data["hChToTauNu"], train=False, scaling_file="scaling_file.npz"),
+            "hToTauTau": zscore_preprocess(data["hToTauTau"], train=False, scaling_file="scaling_file.npz"),
+            "leptoquark_labels": data["leptoquark_labels"],
+            "ato4l_labels":  data["ato4l_labels"],
+            "hChToTauNu_labels":  data["hChToTauNu_labels"],
+            "hToTauTau_labels":  data["hToTauTau_labels"],
+            }
+        return data_dict_preprocessed
+    def save_as_h5(self):
+        # Open HDF5 file and write in the data_dict structure and info
+        with h5py.File(f'{args.output_filename}.hdf5', 'w') as f:
+            for dataset_name in self.preprocessed_data:
+                dset = f.create_dataset(dataset_name, data=self.preprocessed_data[dataset_name])
+        #Check if it is saved
+        with h5py.File(f'{args.output_filename}.hdf5', 'r') as f:
+            print(list(f.keys()))
+
+
+class ADC_Dataset_balanced():
+    """ 
+    Load, preprocess and save k-fold of the ADC-dataset.
+    0:'W-Boson',
+    1:'QCD',
+    2:'Z_2',
+    3:'tt', 
+    """
+    def __init__(self, args):
+        self.data = self.load_dataset(args)
+        self.k_folded_data = self.kfold_dataset(n_folds=5,data=self.data)
+
+    def load_dataset(self, args):
+        dataset = np.load(args.background_dataset)
+        print(f"Dataset files loaded: {dataset.files}")
+        data_dict = {
+            "x_train": dataset["x_train"][dataset["ix_train"]],
+            "x_val": dataset["x_val"][dataset["ix_val"]],
+            "x_test": dataset["x_test"][dataset["ix_test"]],
+            "labels_train": dataset["labels_train"][dataset["ix_train"]],
+            "labels_val": dataset["labels_val"][dataset["ix_val"]],
+            "labels_test": dataset["labels_test"][dataset["ix_test"]],
+        }
+        return data_dict
+    def print_stats(self):
+        events_train = len(self.data["labels_train"])
+        events_val = len(self.data["labels_val"])
+        events_test = len(self.data["labels_test"])
+        #Combine train and val and just kfold!
+        events_train = events_train + events_val
+        #Print class distribution and number of events in train/test datasets
+        class_dist_train = {
+            "class_0": np.sum(self.data['labels_train'] == 0) +np.sum(self.data['labels_val'] == 0),
+            "class_1": np.sum(self.data['labels_train'] == 1) +np.sum(self.data['labels_val'] == 1),
+            "class_2": np.sum(self.data['labels_train'] == 2) +np.sum(self.data['labels_val'] == 2),
+            "class_3": np.sum(self.data['labels_train'] == 3) +np.sum(self.data['labels_val'] == 3),
+        }
+        class_dist_test = {
+            "class_0": np.sum(self.data['labels_test'] == 0),
+            "class_1": np.sum(self.data['labels_test'] == 1),
+            "class_2": np.sum(self.data['labels_test'] == 2),
+            "class_3": np.sum(self.data['labels_test'] == 3),
+        }
+        types = ["Train", "Test"]
+        lengths = [events_train, events_test]
+        classes = [class_dist_train, class_dist_test]
+        for type, length, classe in zip(types, lengths, classes):
+            print(f"===============")
+            print(f"Printing statistics for the {type} dataset:")
+            print(f"===============")
+            print(f"Total events in the {type} dataset: {length}")
+            print(f"Percentage of W-Boson events: {classe['class_0']/length*100}%")
+            print(f"Percentage of QCD-multijet events: {classe['class_1']/length*100}%")
+            print(f"Percentage of Z-Boson events: {classe['class_2']/length*100}%")
+            print(f"Percentage of ttbar events: {classe['class_3']/length*100}%")
+    def kfold_dataset(self, n_folds, data):
+        #First shuffle the dataset and then split it into 5 equal sized folds
+        k_folded_dict = {
+            "x_test": data["x_test"],
+            "labels_test": data["labels_test"]
+        }
+        #Combine the test and val set as that is handled by the k-folding!
+        data["x_combined"] = np.concatenate((data["x_train"], data["x_val"]), axis=0)
+        data["labels_combined"] = np.concatenate((data["labels_train"], data["labels_val"]), axis=0)
+        data["x_combined"], data["labels_combined"] = shuffle(data["x_combined"],data["labels_combined"], random_state=args.seed)
+        idx = np.random.choice(n_folds, size=len(data["labels_combined"]), replace=True)
+        for i in range(n_folds):
+            mask = (idx == i)
+            k_folded_dict[f"x_train_fold_{i}"] = data["x_combined"][mask]
+            k_folded_dict[f"labels_train_fold_{i}"] = data["labels_combined"][mask]
+        return k_folded_dict 
+    def save_as_h5(self):
+        # Open HDF5 file and write in the data_dict structure and info
+        with h5py.File(f'{args.output_filename}.hdf5', 'w') as f:
+            for dataset_name in self.k_folded_data:
+                dset = f.create_dataset(dataset_name, data=self.k_folded_data[dataset_name])
+        #Check if it is saved
+        with h5py.File(f'{args.output_filename}.hdf5', 'r') as f:
+            print(list(f.keys()))
+
 def zscore_preprocess(
     input_array,
     train=False,
@@ -135,12 +310,15 @@ def main(args):
     random.seed(args.seed)
 
     #Create the dataset
-    dataset = ADC_Dataset(args)
+    #dataset = ADC_Dataset(args)
+    dataset = ADC_Dataset_balanced(args)
+    #dataset = JetClass_Dataset(args)
     #Print stats
     dataset.print_stats()
     #Save the h5 file
     dataset.save_as_h5()
-
+    #dataset = ADC_Signal(args)
+    #dataset.save_as_h5()
 if __name__=='__main__':
     # Parses terminal command
     parser = ArgumentParser()

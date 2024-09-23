@@ -533,7 +533,7 @@ class BACKGROUND_SIGNAL_INFERENCE_LATENT_JETCLASS(Dataset):
         self.runs = runs
         self.latent_dim = latent_dim
         #transform_augment = augmentations.Transform([])
-        if finetune: #If finetuning start from orginal JetClass input dimension (57D)
+        if finetune: #If finetuning start from orginal JetClass input dimension (512D)
             self.latent_dim = 512
         self.labeled_num = labeled_num
         drive_path = f'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\'
@@ -611,9 +611,9 @@ class BACKGROUND_SIGNAL_INFERENCE_LATENT_JETCLASS(Dataset):
             device = device
         #Import model for embedding depending on embedding_type
         if embedding_type == 'SimpleDense_JetClass':
-            #model = SimpleDense_JetClass(self.latent_dim).to(device)
-            model = CVAE_JetClass(self.latent_dim).to(device)
-            model.load_state_dict(torch.load(model_name + 'vae.pth', map_location=torch.device(device)))
+            model = SimpleDense_JetClass(self.latent_dim).to(device)
+            #model = CVAE_JetClass(self.latent_dim).to(device)
+            model.load_state_dict(torch.load(model_name + 'vae1.pth', map_location=torch.device(device)))
         elif embedding_type == 'dino_transformer_JetClass':
             model = TransformerEncoder(**transformer_args_jetclass)
             model.load_state_dict(torch.load(model_name + '_teacher_dino_transformer.pth', map_location=torch.device(device)))
@@ -645,8 +645,8 @@ class TorchCLDataset(Dataset):
   def __init__(self, features, labels, device):
         'Initialization'
         self.device = device
-        self.mean = np.mean(features)
-        self.std = np.std(features)
+        #self.mean = np.mean(features)
+        #self.std = np.std(features)
         #print(f"Mean: {self.mean} and std: {self.std}")
         self.features = torch.from_numpy(features).to(dtype=torch.float32)
         self.labels = torch.from_numpy(labels).to(dtype=torch.float32)
@@ -660,8 +660,6 @@ class TorchCLDataset(Dataset):
         # Load data and get label
         X = self.features[index]
         y = self.labels[index]
-        #Normalize again (!!! has already been pre-normalized with z_score pT norm.)
-        #X = (X-self.mean)/self.std
 
         return X, y 
 

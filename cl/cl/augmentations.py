@@ -57,7 +57,7 @@ def rot_around_beamline(input_batch, device=None, rand_number=0, feat_dim=57):
 
     return rotated_batch
 
-def gaussian_resampling_pT(input_batch, device=None, rand_number=0, std_scale=0.1, feat_dim=57):
+def gaussian_resampling_pT(input_batch, device=None, rand_number=0, std_scale=2.0, feat_dim=57):
     '''
     Applies the augmentation "gaussian resampling of pT" to events in a batch (torch tensor) and outputs a torch tensor with pT values rescaled within std.
     Resample pT of constituents with mu=pT, std=pT*std_scale in the DELPHES dataset w/ structure: MET, 4x electron, 4x muon, 10x jet.
@@ -77,6 +77,32 @@ def gaussian_resampling_pT(input_batch, device=None, rand_number=0, std_scale=0.
     #np.random.seed(rand_number) #not sure if I should seed
     for x in input_numpy:
         x[:,0] = np.random.normal(loc=x[:,0], scale=np.absolute(x[:,0])*std_scale)
+
+    #Return a torch tensor on the given device and correct shape (-1,57)
+    resampled_batch = torch.from_numpy(input_numpy.reshape(-1,feat_dim)).to(dtype=torch.float32)
+
+    return resampled_batch
+
+def gaussian_resampling(input_batch, device=None, rand_number=0, std_scale=1.5, feat_dim=57):
+    '''
+    Applies the augmentation "gaussian resampling of pT" to events in a batch (torch tensor) and outputs a torch tensor with pT values rescaled within std.
+    Resample pT of constituents with mu=pT, std=pT*std_scale in the DELPHES dataset w/ structure: MET, 4x electron, 4x muon, 10x jet.
+    Each constituent has 3x features: transverse mom. pT, pseudorapidity eta, azimuthal angle phi.
+    Args:
+        input_batch: (batch_size, 57) flattened input
+        device: cuda or cpu depending on input
+        std_scale: scale multiplier for standard deviation std = pT * std_scale (default: 0.1)
+    Returns:
+        resampled_batch: (batch_size, 57) permutated output
+    '''
+    if feat_dim == 57:
+        input_numpy = input_batch.numpy().reshape(-1,19,3).copy()
+    elif feat_dim == 512:
+        input_numpy = input_batch.numpy().reshape(-1,128,4).copy()
+    #Guassian resample the pT's of each constituent with mu=pT and std = pT * std_scale
+    #np.random.seed(rand_number) #not sure if I should seed
+    for x in input_numpy:
+        x[:,:] = np.random.normal(loc=x[:,:], scale=np.absolute(x[:,:])*std_scale)
 
     #Return a torch tensor on the given device and correct shape (-1,57)
     resampled_batch = torch.from_numpy(input_numpy.reshape(-1,feat_dim)).to(dtype=torch.float32)
@@ -141,7 +167,7 @@ def hardlepton_masking(input_batch, device=None):
     Returns:
         resampled_batch: (batch_size, 57) masked output
     '''
-    input_numpy = input_batch.cpu().detach().numpy().reshape(-1,19,3)
+    input_numpy = input_batch.cpu().detach().numpy().reshape(-1,19,3).copy()
     #As there is a guaranteed lepton in each event, we have to find the highest pT one first (either first electron or muon)
     lepton_pT = np.concatenate((input_numpy[:, 0:4, 0], input_numpy[:, 4:8, 0]))  # Concatenate electron and muon pT values
     highest_pT_index = np.argmax(lepton_pT, axis=1)
@@ -154,7 +180,7 @@ def hardlepton_masking(input_batch, device=None):
     resampled_batch = torch.from_numpy(input_numpy.reshape(-1,57)).to(dtype=torch.float32, device=device)
     return resampled_batch
 
-def detector_crop(input_batch, device=None, rand_number=0, crop_size = 5.0):
+def detector_crop(input_batch,feat_dim, device=None, rand_number=0, crop_size = 2.5):
     '''
     Applies the augmentation "detector_crop" to events in a batch (torch tensor) and outputs a torch tensor.
     It randomly crops an area of deltaR <= crop_size of the detector and masks it by zero padding the rest.
@@ -165,8 +191,10 @@ def detector_crop(input_batch, device=None, rand_number=0, crop_size = 5.0):
     Returns:
         resampled_batch: (batch_size, 57) masked output
     '''
-    np.random.seed(rand_number)
-    input_numpy = input_batch.cpu().detach().numpy().reshape(-1,19,3)
+    if feat_dim == 57:
+        input_numpy = input_batch.numpy().reshape(-1,19,3).copy()
+    elif feat_dim == 512:
+        input_numpy = input_batch.numpy().reshape(-1,128,4).copy()
     #Randomly crop a region of the detector with size deltaR
     #First find a random point in the angular space of the detector by uniform sampling on the unit sphere using the inverse transform method
     theta = np.arccos(1-2*np.random.rand(input_numpy.shape[0]))
@@ -176,7 +204,7 @@ def detector_crop(input_batch, device=None, rand_number=0, crop_size = 5.0):
     deltaR = np.sqrt((input_numpy[:,:,1] - eta[:,None])**2 + (input_numpy[:,:,2]-phi[:,None])**2 + 1e-4)
     mask = deltaR <= crop_size
     input_numpy[~mask] = 0.0
-    resampled_batch = torch.from_numpy(input_numpy.reshape(-1,57)).to(dtype=torch.float32, device=device)
+    resampled_batch = torch.from_numpy(input_numpy.reshape(-1,feat_dim)).to(dtype=torch.float32)
     return resampled_batch
 
 def corruption(input_batch, feat_low, feat_high, feat_mean, feat_std, mode=None, device=None, rand_number=0, corruption_rate=0.6):
@@ -224,6 +252,10 @@ class Transform():
                 self.augmentations.append(rot_around_beamline)
             elif augment == 'permutation':
                 self.augmentations.append(permutation)
+            elif augment == 'gaussian_resampling':
+                self.augmentations.append(gaussian_resampling)
+            elif augment == 'detector_crop':
+                self.augmentations.append(detector_crop)
             else:
                 assert False
 
