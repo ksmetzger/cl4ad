@@ -180,6 +180,7 @@ def main(args):
     np.save(f'{folder_out+NP}/t0.npy', t0)
     np.save(f'{folder_out+NP}/t1.npy', t1)
 
+#Run inference given a pytorch model and the model weights for the test dataset
 def inference(model_name, input_data, input_labels, device=None):
     '''
     Inference for test input with dimensionality (-1, 57) using model SimpleDense().
@@ -188,7 +189,7 @@ def inference(model_name, input_data, input_labels, device=None):
         device = torch.device('cpu')
     else: 
         device = device
-    #Import model for embedding
+    #Import model and model weights for the embedding
     #model = SimpleDense(latent_dim=12).to(device)
     #model = SimpleDense_small().to(device)
     #model = DeepSets(latent_dim=6).to(device)

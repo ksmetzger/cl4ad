@@ -8,14 +8,18 @@ import random
 import torch
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.tensorboard import SummaryWriter
-from torchsummary import summary
+#from torchsummary import summary
+from torch.nn.parallel import DistributedDataParallel
+import torch.distributed as dist
 
 import losses
 from models import CVAE, SimpleDense, DeepSets, SimpleDense_small, SimpleDense_JetClass, CVAE_JetClass
 from transformer import TransformerEncoder
 import augmentations
 import math
-import utils_dpp as utils
+import utils_ddp as utils
+from sklearn.utils import shuffle
+import h5py
 
 def main(args):
     '''
@@ -29,44 +33,46 @@ def main(args):
     #Initialize the distributed backend
     utils.init_distributed_mode(args)
 
-    #Dataset with signals and original divisions=[0.592,0.338,0.067,0.003]
-    dataset = np.load(args.dataset)
+    print(f"Using train folds: {train_idx}")
+    print(f"and using val fold: {val_idx}")
+    with h5py.File(f'{args.dataset}', 'r') as f:
+        train_fold = np.concatenate([np.array(f[f'x_train_fold_{idx}'][...]) for idx in train_idx], axis=0)
+        labels_train_fold = np.concatenate([np.array(f[f'labels_train_fold_{idx}'][...]) for idx in train_idx], axis=0)
+        val_fold = np.array(f[f'x_train_fold_{val_idx}'][...])
+        labels_val_fold = np.array(f[f'labels_train_fold_{val_idx}'][...])
+        x_test = np.array(f['x_test'][...])
+        labels_test = np.array(f['labels_test'][...])
+    #Shuffle the train dataset
+    train_fold, labels_train_fold = shuffle(train_fold, labels_train_fold, random_state=0)
 
     feat_dim = 57
     if args.type == 'JetClass' or args.type == 'JetClass_Transformer':
         feat_dim = 512
 
-    #For corruption augm. get min, max, mean, std values of all the features in the training dataset
-    charac_trainset = dict(
-        feat_low = np.min(dataset['x_train'].reshape(-1,feat_dim), axis=0), 
-        feat_high = np.max(dataset['x_train'].reshape(-1,feat_dim), axis=0),
-        feat_mean = np.mean(dataset['x_train'].reshape(-1,feat_dim), axis=0), 
-        feat_std = np.std(dataset['x_train'].reshape(-1, feat_dim), axis=0),
-    )
     #Initialize transform (empty list: None)
     transform = augmentations.Transform(["naive_masking"], feat_dim)
     
     #Distributed samplers
-    sampler_train = torch.utils.data.DistributedSampler(TorchCLDataset(dataset['x_train'].reshape(-1,feat_dim), dataset['labels_train'].reshape(-1)), shuffle=True)
-    sampler_val = torch.utils.data.DistributedSampler(TorchCLDataset(dataset['x_val'].reshape(-1,feat_dim), dataset['labels_val'].reshape(-1)), shuffle=False)
-    sampler_test = torch.utils.data.DistributedSampler(TorchCLDataset(dataset['x_test'].reshape(-1,feat_dim), dataset['labels_test'].reshape(-1)), shuffle=False)
+    sampler_train = torch.utils.data.DistributedSampler(TorchCLDataset(train_fold.reshape(-1,feat_dim), labels_train_fold.reshape(-1)), shuffle=True)
+    sampler_val = torch.utils.data.DistributedSampler(TorchCLDataset(val_fold.reshape(-1,feat_dim), labels_val_fold.reshape(-1)), shuffle=False)
+    sampler_test = torch.utils.data.DistributedSampler(TorchCLDataset(x_test.reshape(-1,feat_dim), labels_test.reshape(-1)), shuffle=False)
 
     train_data_loader = DataLoader(
-        TorchCLDataset(dataset['x_train'].reshape(-1,feat_dim), dataset['labels_train'].reshape(-1)),
+        TorchCLDataset(train_fold.reshape(-1,feat_dim), labels_train_fold.reshape(-1)),
         batch_size=args.batch_size, sampler=sampler_train)
 
     test_data_loader = DataLoader(
-        TorchCLDataset(dataset['x_test'].reshape(-1,feat_dim), dataset['labels_test'].reshape(-1)),
+        TorchCLDataset(x_test.reshape(-1,feat_dim), labels_test.reshape(-1)),
         batch_size=args.batch_size, sampler=sampler_test)
 
     val_data_loader = DataLoader(
-        TorchCLDataset(dataset['x_val'].reshape(-1,feat_dim), dataset['labels_val'].reshape(-1)),
+        TorchCLDataset(val_fold.reshape(-1,feat_dim), labels_val_fold.reshape(-1)),
         batch_size=args.batch_size, sampler=sampler_val)
 
     if args.type == 'JetClass':
-        model = SimpleDense_JetClass(args.latent_dim).to(device)
+        model = SimpleDense_JetClass(args.latent_dim).to(args.gpu)
         #model = CVAE_JetClass(args.latent_dim).to(device)
-        summary(model, input_size=(512,))
+        #summary(model, input_size=(512,))
     elif args.type == 'JetClass_Transformer':
         transformer_args_jetclass = dict(
         input_dim=4, 
@@ -82,11 +88,29 @@ def main(args):
         use_mask = True,
         )
         model = TransformerEncoder(**transformer_args_jetclass)
-        summary(model, input_size=(128,4))
+        #summary(model, input_size=(128,4))
     else:
         #model = SimpleDense(args.latent_dim).to(device)
-        model = SimpleDense_small().to(device)
-        summary(model, input_size=(57,))
+        #model = SimpleDense_small().to(args.gpu)
+        #summary(model, input_size=(57,))
+        transformer_args_standard = dict(
+        input_dim=3, 
+        model_dim=64, 
+        output_dim=64, 
+        embed_dim=64,
+        n_heads=8, 
+        dim_feedforward=256, 
+        n_layers=4,
+        hidden_dim_dino_head=256,
+        bottleneck_dim_dino_head=64,
+        pos_encoding = False,
+        use_mask = False,
+        mode='flatten',
+        dropout=0,
+        )
+        model = TransformerEncoder(**transformer_args_standard).to(args.gpu)
+        #Wrap with DDP
+        model = DistributedDataParallel(model, device_ids=[args.gpu])
 
     # criterion = losses.SimCLRLoss()
     #criterion = losses.VICRegLoss(inv_weight=10, var_weight=25, cov_weight=10)
@@ -117,11 +141,11 @@ def main(args):
             #For DeepSets needs input shape (bsz, 19 , 3)
             #embedded_values_orig = model(val)
             if 'Transformer' in args.type:
-                    embedded_values_orig = model(transform(val).reshape(-1,128,4).to(device=device))
-                    embedded_values_aug = model(transform(val).reshape(-1,128,4).to(device=device))
+                    embedded_values_orig = model(transform(val).reshape(-1,128,4).to(device=args.gpu))
+                    embedded_values_aug = model(transform(val).reshape(-1,128,4).to(device=args.gpu))
             else:
-                embedded_values_orig = model(transform(val).to(device=device))
-                embedded_values_aug = model(transform(val).to(device=device))
+                embedded_values_orig = model(transform(val).reshape(-1,19,3).to(device=args.gpu))
+                embedded_values_aug = model(transform(val).reshape(-1,19,3).to(device=args.gpu))
             #embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
             #embedded_values_orig = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0))
             #embedded_values_aug = model(first_val_repeated)
@@ -166,11 +190,11 @@ def main(args):
 
                 #first_val_repeated = val[0].repeat(args.batch_size, 1)
                 if 'Transformer' in args.type:
-                    embedded_values_orig = model(transform(val).reshape(-1,128,4).to(device=device))
-                    embedded_values_aug = model(transform(val).reshape(-1,128,4).to(device=device))
+                    embedded_values_orig = model(transform(val).reshape(-1,128,4).to(device=args.gpu))
+                    embedded_values_aug = model(transform(val).reshape(-1,128,4).to(device=args.gpu))
                 else:
-                    embedded_values_orig = model(transform(val).to(device=device))
-                    embedded_values_aug = model(transform(val).to(device=device))
+                    embedded_values_orig = model(transform(val).reshape(-1,19,3).to(device=args.gpu))
+                    embedded_values_aug = model(transform(val).reshape(-1,19,3).to(device=args.gpu))
                 #embedded_values_orig = model(val)
                 #embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
                 #embedded_values_aug = model(first_val_repeated)
@@ -208,7 +232,7 @@ def main(args):
         #Initialize the Early Stopper
         folder = "output\checkpoints"
         os.makedirs(folder, exist_ok=True)
-        EarlyStopper = EarlyStopping(patience=5, delta=0, path=os.path.join(folder,args.model_name), verbose=True)
+        #EarlyStopper = EarlyStopping(patience=5, delta=0, path=os.path.join(folder,args.model_name), verbose=True)
         start_time = time.time()
 
         for epoch in range(1, args.epochs+1):
@@ -232,15 +256,16 @@ def main(args):
             print(f"Train/Val Sim Loss after epoch: {avg_train_loss:.4f}/{avg_val_loss:.4f}")
             print(f"taking {temp_time:.1f}s to complete")
 
-            # #Save checkpoint
-            # path = os.path.join(folder, args.model_name)
-            # torch.save(model.state_dict(), f"{path}_vae_ep_{epoch}.pth")
+            #Save checkpoint on master
+            if dist.get_rank()==0:
+                path = os.path.join(folder, args.model_name)
+                torch.save(model.state_dict(), f"{path}_valfold_{val_idx}_vae_ep_{epoch}.pth")
 
-            #Check whether to EarlyStop
+            """ #Check whether to EarlyStop
             EarlyStopper(avg_val_loss, model, epoch)
             if EarlyStopper.early_stop:
                 break
-
+ """
             #scheduler.step()
         writer.flush()
         #torch.save(model.state_dict(), args.model_name)
@@ -256,7 +281,7 @@ def main(args):
         plt.savefig('output/loss.pdf')
         
     else:
-        model.load_state_dict(torch.load(args.model_name, map_location=torch.device(device)))
+        """ model.load_state_dict(torch.load(args.model_name, map_location=torch.device(device)))
         model.eval()
 
         #Save the embedding output for the background and signal part
@@ -272,7 +297,7 @@ def main(args):
                 embedding_dict[f"labels_{name}"] = dataset[f'labels_{name}']
 
         np.savez(args.output_filename, **embedding_dict)
-        print(f"Successfully saved embedding under {args.output_filename}")
+        print(f"Successfully saved embedding under {args.output_filename}") """
 
 class LARS(torch.optim.Optimizer): #Implementation from https://github.com/facebookresearch/vicreg/blob/main/main_vicreg.py.
     def __init__(
@@ -433,6 +458,20 @@ if __name__ == '__main__':
     parser.add_argument('--latent-dim', type=int, default=48)
     parser.add_argument('--train', action='store_true')
     parser.add_argument('--type', choices=('Delphes', 'JetClass', 'JetClass_Transformer'))
+    parser.add_argument('--k-fold', action='store_true')
+    parser.add_argument("--dist_url", default="env://", type=str, help="""url used to set up
+        distributed training; see https://pytorch.org/docs/stable/distributed.html""")
+
 
     args = parser.parse_args()
     main(args)
+    #Do the k-folding (runs the main loop five times)
+    if args.k_fold:
+        for i in range(5):
+            train_idx = [0,1,2,3,4]
+            train_idx.remove(i)
+            val_idx = i
+            main(args, train_idx=train_idx, val_idx=val_idx)
+    else:
+        #To test just set the trainset to fold0 and valset to fold1
+        main(args, train_idx=[0], val_idx=1)

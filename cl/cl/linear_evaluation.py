@@ -3,9 +3,8 @@ import random
 import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import DataLoader, Dataset
-import losses
 from models import CVAE, SimpleDense, DeepSets, Identity, SimpleDense_small, SimpleDense_JetClass, CVAE_JetClass, SimpleDense_ADC
-import augmentations
+#import augmentations
 import argparse
 from pathlib import Path
 import warnings
@@ -18,8 +17,8 @@ from sklearn.utils import shuffle
 from transformer import TransformerEncoder
 import h5py
 
-'''Linear evaluation of self-supervised embedding in order to calculate top1/top5 accuracies as
-   standard in literature and leaderboards. Inspired by https://github.com/facebookresearch/vicreg/blob/main/evaluate.py.'''
+'''Linear evaluation of self-supervised/supervised embeddings in order to calculate top1/top5 accuracies as
+   standard in vision-based literature and leaderboards. Inspired by https://github.com/facebookresearch/vicreg/blob/main/evaluate.py.'''
 
 def get_arguments():
     parser = argparse.ArgumentParser(description="Evaluate the linear top1/top5 accuracy given the pretrained embedding")
@@ -29,19 +28,19 @@ def get_arguments():
     parser.add_argument('--scaling-filename', type=str)
     parser.add_argument('--sample-size', type=int, default=-1)
 
-    parser.add_argument("--pretrained",default="output/runs1/vae.pth", type=Path, help="path to pretrained model")
+    parser.add_argument("--pretrained",default="output/runs1/vae.pth", type=Path, help="path to pretrained model weights")
     parser.add_argument("--epochs", default=10, type=int, metavar="N", help="number of epochs to train linear layer")
     parser.add_argument("--batch-size", default=1024, type=int, metavar="N")
     parser.add_argument("--weight-decay", default=1e-6, type=float, metavar="W", help="weight decay (for SGD and ADAM this is equivilant to the L2 penalty)")
     parser.add_argument("--lr", default=1e-3, type=float, metavar="N")
     parser.add_argument("--arch", type=str, default="SimpleDense", help="Type of model used to train embedding (backbone)")
-    parser.add_argument("--num-classes", default=8, type=int, help="number of classes (background + signals)")
-    parser.add_argument("--type", default="freeze", type=str, choices=("freeze", "finetune", "finetune_just_background"), help="Whether to freeze weights and train full data on linear layer or finetune the model with a semi-supervised approach.")
+    parser.add_argument("--num-classes", default=8, type=int, help="number of classes")
+    parser.add_argument("--type", default="freeze", type=str, choices=("freeze", "finetune", "finetune_just_background"), help="Whether to freeze weights and train with full data on linear layer or finetune the model with a semi-supervised approach.")
     parser.add_argument("--percent", default=1, type=int, choices=(1,10,100), help="If finetune, choose percentage of labeled train data the model is finetuned on.")
     parser.add_argument('--head-name', type=str, default='output/head.pth')
     parser.add_argument('--backbone-name', type=str, default='output/backbone_finetuned.pth')
-    parser.add_argument('--latent-dim', type=int, default=48)
-    parser.add_argument('--k-fold', type=int, default=-1)
+    parser.add_argument('--latent-dim', type=int, default=48, help="Latent dimension of the embedding")
+    parser.add_argument('--k-fold', type=int, default=-1, help="If a k-folded dataset is used, choose which fold is held out as the validation-set")
     return parser
 
 
@@ -71,6 +70,7 @@ def main():
     print(" ".join(sys.argv), file=stats_file)
     best_acc = argparse.Namespace(top1=0, top5=0)
 
+    #Set the input dimensions of the dataset for the different architectures: JetClass has original shape: (-1,512), ADC_Delphes: (-1,57).
     if args.arch == "SimpleDense_JetClass" or args.arch == "CVAE_JetClass":
         feat_dim = (-1,512)
     elif args.arch == "TransformerEncoder_JetClass":
@@ -80,8 +80,13 @@ def main():
     else:
         feat_dim = (-1,57)
 
-    #Dataset with signals and original divisions=[0.592,0.338,0.067,0.003]
+    #####
+    # Load the dataset/embedding for evaluation
+    #####
+    #Dataset with signals and original divisions=[0.592,0.338,0.067,0.003] in a .npz file format
     #x_train, x_test, x_val, labels_train, labels_test, labels_val = load_data(args.dataset, feat_dim)
+
+    #K-folded dataset without signals (just background) and original divisions in a .hdf5 file format
     #Load k-folding if k-fold != -1
     if args.k_fold != -1:
         train_idx = [0,1,2,3,4]
@@ -92,10 +97,10 @@ def main():
         val_idx = 1
     x_train, x_test, x_val, labels_train, labels_test, labels_val = load_data_nfolds(args.dataset, feat_dim, train_idx, val_idx)
 
-    #Get transformations to apply in the training process
-    transform = augmentations.Transform([], feat_dim)
+    #Get transformations to apply in the training process (default: no augmentations used)
+    #transform = augmentations.Transform([], feat_dim)
 
-    #Get pretrained model
+    #Get pretrained model by loading the model
     if args.arch == "SimpleDense":
         embed_dim = args.latent_dim
         backbone = SimpleDense(latent_dim=args.latent_dim)
@@ -147,7 +152,7 @@ def main():
         n_layers=4,
         hidden_dim_dino_head=256,
         bottleneck_dim_dino_head=64,
-        pos_encoding = True,
+        pos_encoding = False,
         use_mask = False,
         mode='flatten',
         dropout = 0,
@@ -206,11 +211,8 @@ def main():
     state_dict = torch.load(args.pretrained, map_location='cpu')
     backbone.load_state_dict(state_dict=state_dict)
     
+    #Define the linear layer for evaluation
     head = nn.Linear(embed_dim, args.num_classes)
-    # head = nn.Sequential(
-    #     nn.Linear(embed_dim, 48),
-    #     nn.Linear(48, args.num_classes)
-    # )
     head.weight.data.normal_(mean=0.0, std=0.01)
     head.bias.data.zero_()
 
@@ -262,6 +264,7 @@ def main():
         batch_size=args.batch_size,
         shuffle=False)
     print("Length of the test Dataloader: ",len(test_data_loader))
+
     #Loss function set to the standard CrossEntropyLoss
     criterion = nn.CrossEntropyLoss().to(device=device)
     
@@ -271,6 +274,7 @@ def main():
     optimizer = torch.optim.SGD(param_groups, lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, args.epochs)
 
+    #Evaluation loop
     start_time = time.time()
     for epoch in range(args.epochs):
         if args.type == "freeze":
@@ -288,7 +292,7 @@ def main():
         for step, (data, target) in enumerate(train_data_loader, start = epoch*len(train_data_loader)):
             target = target.long().to(device)
             #output = head(backbone.representation(augmentations.naive_masking(data, device=device, rand_number=0))) #Train with the same augmentations as the contrastive objective
-            output = head(backbone.representation(transform(data).to(device)))
+            output = head(backbone.representation(data.to(device)))
             loss = criterion(output, target.reshape(-1))
             optimizer.zero_grad()
             loss.backward()
@@ -351,7 +355,7 @@ def main():
     print(json.dumps(stats_test), file=stats_file)
 
 
-#Copied straight from: https://github.com/facebookresearch/vicreg/blob/main/evaluate.py
+#Copied straight from: https://github.com/facebookresearch/vicreg/blob/main/evaluate.py for computing the top-k accuracy
 def accuracy(output, target, topk=(1,)):
     """Computes the accuracy over the k top predictions for the specified values of k"""
     with torch.no_grad():
@@ -387,6 +391,7 @@ def test_accuracy(dataloader, backbone, head, device):
     print(f"On the test dataset we get the best accuracies for top-1 {best_acc.top1} and top-5 {best_acc.top5}")
     return best_acc.top1, best_acc.top5
 
+#Helper class for saving the average and current accuracies
 class AverageMeter(object):
     """Computes and stores the average and current value"""
 
@@ -411,6 +416,7 @@ class AverageMeter(object):
         fmtstr = "{name} {val" + self.fmt + "} ({avg" + self.fmt + "})"
         return fmtstr.format(**self.__dict__)
     
+#Helper functions for data-loading (Adjust as necessary for the dataset and filetype used)
 def load_data(data_dir='', feat_dim=512):
     dataset = np.load(data_dir)
     x_train, labels_train = dataset['x_train'].reshape(feat_dim), dataset['labels_train'].reshape(-1)
@@ -431,6 +437,7 @@ def load_data_nfolds(data_dir='', feat_dim=512, train_idx=[0], val_idx=1):
     x_val, labels_val = val_fold.reshape(feat_dim), labels_val_fold.reshape(-1)
     return x_train, x_test, x_val, labels_train, labels_test, labels_val
 
+#For an unbalanced dataset, sample class_size events from each class
 def sample_equal_class_size(data, labels, class_size):
     sample_mask = []
     #print(class_size)
@@ -445,13 +452,12 @@ def sample_equal_class_size(data, labels, class_size):
     data, labels = shuffle(data, labels, random_state=0)
     return data, labels
 
+#Defines the pytorch dataset needed for the dataloaders and subsequent training
 class TorchCLDataset(Dataset):
   'Characterizes a dataset for PyTorch'
   def __init__(self, features, labels, device):
         'Initialization'
         self.device = device
-        #self.mean = np.mean(features)
-        #self.std = np.std(features)
         self.features = torch.from_numpy(features).to(dtype=torch.float32)
         self.labels = torch.from_numpy(labels).to(dtype=torch.float32)
 
@@ -464,8 +470,6 @@ class TorchCLDataset(Dataset):
         # Load data and get label
         X = self.features[index]
         y = self.labels[index]
-        #Normalize again (!!! has already been pre-normalized with z_score pT norm.)
-        #X = (X-self.mean)/self.std
 
         return X, y
 

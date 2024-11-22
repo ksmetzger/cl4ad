@@ -19,3 +19,6 @@ output_tuner
 *.sh
 *.hdf5
 nplm/out
+nplm/savefigs
+nplm/savefigs_paper
+nplm/*.md

@@ -517,9 +517,9 @@ def main(runs):
     #Load embedding (test (train/val used for model optim))
     drive_path = 'C:\\Users\\Kyle\\OneDrive\\Transfer Master project\\orca_fork\\cl4ad\\cl\\cl\\'
     #data = np.load(drive_path+'dataset_background_signal.npz')
-    #data = np.load(drive_path+'jetclass_dataset/JetClass_background_signal_reshaped.npz')
+    data = np.load(drive_path+'jetclass_dataset/JetClass_background_signal_reshaped.npz')
     #data = np.load(drive_path+'background_dataset_divided.npz')
-    data = np.load(drive_path+'jetclass_dataset/JetClass_background_higgs_signal_testset.npz')
+    #data = np.load(drive_path+'jetclass_dataset/JetClass_background_higgs_signal_testset.npz')
     """ with h5py.File(drive_path+f'JetClass_kfolded.hdf5', 'r') as f:
         data_test = np.array(f['x_test'][...]).reshape(-1,512)
         labels_test = np.array(f['labels_test'][...]) """
@@ -551,7 +551,7 @@ def main(runs):
     #labels_test = data['labels_test'][data['ix_test']]
     #data_test = data['x_test'][data['ix_test']].reshape(-1,57)
     #embedded_test = inference(f'output/{runs}/vae.pth', data_test, labels_test)
-    embedded_test = inference(f'output/{runs}/vae1.pth', data_test, labels_test)
+    embedded_test = inference(f'output/{runs}/vae3.pth', data_test, labels_test)
     #embedded_leptoquark = inference(f'output/{runs}/vae3.pth', leptoquark, leptoquark_labels)
     #embedded_ato4l = inference(f'output/{runs}/vae3.pth', ato4l, ato4l_labels)
     #embedded_hChToTauNu = inference(f'output/{runs}/vae3.pth', hChToTauNu, hChToTauNu_labels)
@@ -622,8 +622,10 @@ def main(runs):
             if i != 0:
                 corner_plot(embedded_test[idx], labels[idx], f'Corner plot of (3D-PCA) of the embedding with anomaly {key}{iteration}', 
                             f'Corner plot of (3D-PCA) of the embedding with anomaly {key}{iteration}.png',dict_labels_color, dict_labels_names, pca=False, normalize=True, background='one', anomalies=[key], folder=f'output/{runs}/plots/{subfolder}') """
-        corner_plot(embedded_test[idx], labels[idx], f'Corner plot of (3D-PCA) of the embedding with anomaly all{iteration}', 
-                            f'Corner plot of (3D-PCA) of the embedding with anomaly all{iteration}.png',dict_labels_color, dict_labels_names, pca=False, normalize=False, background='one', anomalies=['hToBB','hToCC','hToGG','hTo4q','hTolvqq','tTobqq','tToblv','WToqq','ZToqq'], folder=f'output/{runs}/plots/{subfolder}')
+        # corner_plot(embedded_test[idx], labels[idx], f'Corner plot of (3D-PCA) of the embedding with anomaly all{iteration}', 
+        #                     f'Corner plot of (3D-PCA) of the embedding with anomaly all{iteration}.png',dict_labels_color, dict_labels_names, pca=False, normalize=False, background='one', anomalies=['hToBB','hToCC','hToGG','hTo4q','hTolvqq','tTobqq','tToblv','WToqq','ZToqq'], folder=f'output/{runs}/plots/{subfolder}')
+        corner_plot(embedded_test[idx], labels[idx], f'Corner plot of (3D-PCA) of the embedding with anomaly htocc_htobb{iteration}', 
+                            f'Corner plot of (3D-PCA) of the embedding with anomaly htocc_htobb{iteration}.png',dict_labels_color, dict_labels_names, pca=False, normalize=False, background='one', anomalies=['hToBB','hToCC'], folder=f'output/{runs}/plots/{subfolder}')
     def animate_method(data_test, labels_test, method='corner'):
         """
             methods implemented so far: 'corner', ...
@@ -658,11 +660,11 @@ def main(runs):
             #Make the gif and save it
             animate(images, type, runs=runs, method=method)
 
-    plot_tsne()
+    #plot_tsne()
     #plot_roc()
     #plot_pca(dimension=2)
-    #plot_corner(embedded_test=embedded_test)
+    plot_corner(embedded_test=embedded_test)
     #animate_method(data_test, labels_test, method='corner')
 
 if __name__ == '__main__':
-    main('runs333')
+    main('runs303')
