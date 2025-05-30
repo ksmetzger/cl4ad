@@ -36,8 +36,6 @@ class TransformerEncoder(nn.Module):
         #self.simclr_head = SimCLRHead(in_dim=self.embed_dim, out_dim=self.output_dim, hidden_dim=[32])
         #Define [CLS] token for aggregate result where head attaches
         self.cls_token = nn.Parameter(torch.zeros(1, 1, model_dim))
-        #Add a classification head (just a linear layer)
-        #self.classification_head = nn.Linear(embed_dim, self.num_classes)
         #If pos_encoding = True, create and apply the positional encoding to the input
         self.pos_encoder = PositionalEncoding(self.model_dim, self.dropout)
         #In order to downsize to a smaller embedding without lowering the model_dim, append an MLP to the CLS token
@@ -103,11 +101,6 @@ class TransformerEncoder(nn.Module):
         if self.mode != 'flatten':
             x = self.downsize(x)
         return x
-    
-    #Adding a classification head to the embedding (for pot. sup. cross entropy)
-    """ def classify(self, x):
-        self.representation(x)
-        self.classification_head(x) """
 
     #For now the implementation does not use masking like in JetCLR, might be revisited later.
     def forward(self, x, x_before_augmentation):

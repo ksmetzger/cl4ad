@@ -32,8 +32,7 @@ def main(args, train_idx, val_idx):
     torch.manual_seed(0)
     random.seed(0)
 
-    #Dataset with signals and original divisions=[0.592,0.338,0.067,0.003]
-    #dataset = np.load(args.dataset)
+    #Import dataset with four SM background classes (ADC_delphes_original_divisions.hdf5)
     print(f"Using train folds: {train_idx}")
     print(f"and using val fold: {val_idx}")
     with h5py.File(f'{args.dataset}', 'r') as f:
@@ -97,12 +96,10 @@ def main(args, train_idx, val_idx):
         model = TransformerEncoder(**transformer_args_jetclass)
         summary(model, input_size=(128,4))
     else:
-        #model = SimpleDense(args.latent_dim).to(device)
-        #model = SimpleDense_small().to(device)
         model = SimpleDense_ADC(args.latent_dim).to(device)
         summary(model, input_size=(57,))
 
-    # criterion = losses.SimCLRLoss()
+    #criterion = losses.SimCLRLoss()
     #criterion = losses.VICRegLoss(inv_weight=10, var_weight=25, cov_weight=10)
     criterion = losses.SimCLRloss_nolabels_fast(temperature=args.loss_temp, base_temperature=args.loss_temp, contrast_mode='one')
     #Standard schedule
@@ -127,10 +124,7 @@ def main(args, train_idx, val_idx):
             if val.shape[0] != args.batch_size:
                 continue
 
-            # embed entire batch with first value of the batch repeated
-            #first_val_repeated = val[0].repeat(args.batch_size, 1)
-            #For DeepSets needs input shape (bsz, 19 , 3)
-            #embedded_values_orig = model(val)
+            #For self-supervised input transform two views: original and augmented
             if 'Transformer' in args.type:
                 embedded_values_orig = model(transform(val).reshape(-1,128,4).to(device=device))
                 embedded_values_aug = model(transform(val).reshape(-1,128,4).to(device=device))
@@ -138,16 +132,9 @@ def main(args, train_idx, val_idx):
                 embedded_values_orig = model(transform(val).to(device=device))
                 embedded_values_aug = model(transform(val).to(device=device))
                 #pass
-            #embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
-            #embedded_values_orig = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0))
-            #embedded_values_aug = model(first_val_repeated)
-            #embedded_values_aug = model(augmentations.corruption(val, **charac_trainset, rand_number=0, device=device, mode='gaussian'))
-            #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
-            #embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
-            #embedded_values_aug = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42))
+ 
             feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
             #similar_embedding_loss = criterion(embedded_values_orig, embedded_values_aug)
-
             similar_embedding_loss = criterion(feature)
             
             #For supervised input, only give one view
@@ -176,12 +163,10 @@ def main(args, train_idx, val_idx):
 
         with torch.no_grad():
             for idx, (val, labels) in enumerate(val_data_loader, 1):
-                #val = val[0]
-                #labels = val[1]
                 if val.shape[0] != args.batch_size:
                     continue
 
-                #first_val_repeated = val[0].repeat(args.batch_size, 1)
+                #For self-supervised input transform two views: original and augmented
                 if 'Transformer' in args.type:
                     embedded_values_orig = model(transform(val).reshape(-1,128,4).to(device=device))
                     embedded_values_aug = model(transform(val).reshape(-1,128,4).to(device=device))
@@ -189,17 +174,9 @@ def main(args, train_idx, val_idx):
                     embedded_values_orig = model(transform(val).to(device=device))
                     embedded_values_aug = model(transform(val).to(device=device))
                     #pass
-                #embedded_values_orig = model(val)
-                #embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
-                #embedded_values_aug = model(first_val_repeated)
-                #embedded_values_orig = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0))
-                #embedded_values_aug = model(augmentations.corruption(val, **charac_trainset, rand_number=0, device=device, mode='gaussian'))
-                #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
-                #embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
-                #embedded_values_aug = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42))
+                
                 feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
                 #similar_embedding_loss = criterion(embedded_values_orig, embedded_values_aug)
-                
                 similar_embedding_loss = criterion(feature)
 
                 #For supervised input, only give one view
@@ -277,20 +254,7 @@ def main(args, train_idx, val_idx):
         model.load_state_dict(torch.load(args.model_name, map_location=torch.device(device)))
         model.eval()
 
-        """ #Save the embedding output for the background and signal part
-        embedding_dict = dict()
-        train_data_loader = DataLoader(
-        TorchCLDataset(dataset['x_train'], dataset['labels_train'], device),
-        batch_size=args.batch_size,
-        shuffle=False)
-        for loader, name in zip([train_data_loader, test_data_loader, val_data_loader],['train','test','val']):
-            with torch.no_grad():
-                embedding = np.concatenate([model.representation(data.to(device)).cpu().detach().numpy() for (data, label) in loader], axis=0)
-                embedding_dict[f"embedding_{name}"] = embedding
-                embedding_dict[f"labels_{name}"] = dataset[f'labels_{name}']
 
-        np.savez(args.output_filename, **embedding_dict)
-        print(f"Successfully saved embedding under {args.output_filename}") """
 
 class LARS(torch.optim.Optimizer): #Implementation from https://github.com/facebookresearch/vicreg/blob/main/main_vicreg.py.
     def __init__(
