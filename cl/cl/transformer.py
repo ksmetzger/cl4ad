@@ -6,9 +6,10 @@ import math
 import matplotlib.pyplot as plt
 
 #Implement transformer (only encoder w/o positional encoding) from "Attention is all you need": https://arxiv.org/pdf/1706.03762.pdf
-#using the implemenation from pytorch, similar to "JetCLR": https://github.com/bmdillon/JetCLR/blob/main/scripts/modules/transformer.py
+#using the pytorch transformer implementation: https://pytorch.org/docs/stable/generated/torch.nn.Transformer.html.
+#(similar to "JetCLR": https://github.com/bmdillon/JetCLR/blob/main/scripts/modules/transformer.py)
 class TransformerEncoder(nn.Module):
-    def __init__(self,input_dim=3, model_dim=512, output_dim=512, embed_dim=64, n_heads=8, dim_feedforward=2048, n_layers=6, hidden_dim_dino_head=2048, bottleneck_dim_dino_head=256, head_norm=False, 
+    def __init__(self,input_dim=3, model_dim=512, output_dim=512, embed_dim=64, n_heads=8, dim_feedforward=2048, n_layers=6, hidden_dim_dino_head=2048, bottleneck_dim_dino_head=256, 
                  dropout=0.1, norm_last_layer=False, pos_encoding=False, use_mask=False, mode='cls'):
         super(TransformerEncoder, self).__init__()
         self.input_dim = input_dim
@@ -18,7 +19,6 @@ class TransformerEncoder(nn.Module):
         self.n_heads = n_heads
         self.dim_feedforward = dim_feedforward
         self.n_layers = n_layers
-        self.head_norm = head_norm
         self.dropout = dropout
         self.hidden_dim_dino_head = hidden_dim_dino_head
         self.bottleneck_dim_dino_head =bottleneck_dim_dino_head
@@ -206,6 +206,8 @@ class SimCLRHead(nn.Module):
     def forward(self, x):
         return self.mlp(x)
 
+#The positional encoding class follows the implementation from pytorch: https://pytorch.org/tutorials/beginner/transformer_tutorial.html.
+#The visualization follows: https://medium.com/@hunter-j-phillips/positional-encoding-7a93db4109e6.
 class PositionalEncoding(nn.Module):
 
     def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 1000):

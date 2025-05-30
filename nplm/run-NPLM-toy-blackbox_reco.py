@@ -10,11 +10,6 @@ from transformer import TransformerEncoder
 #Implementation based on: https://github.com/GaiaGrosso/NPLM-embedding
 ##########
 def main(args):
-    # labels identifying the signal classes in the dataset
-    sig_labels=[args.signal]
-    # labels identifying the background classes in the dataset
-    bkg_labels=[0, 1, 2, 3]
-
     # hyper parameters of the NPLM model based on kernel methods
     ## number of kernels
     M = 1000 
@@ -38,40 +33,27 @@ def main(args):
         x_test = np.array(f['x_test'][...])
         labels_test = np.array(f['labels_test'][...])
     print(f"Background dataset contains {len(labels_test)} events!")
-    #Signal
-    with h5py.File(f'/eos/user/k/kmetzger/test/dino/ADC_Delphes_signals.hdf5', 'r') as f:
-        leptoquark = np.array(f['leptoquark'][...])
-        leptoquark_labels = np.array(f['leptoquark_labels'][...])
-        ato4l = np.array(f['ato4l'][...])
-        ato4l_labels = np.array(f['ato4l_labels'][...])
-        hChToTauNu = np.array(f['hChToTauNu'][...])
-        hChToTauNu_labels = np.array(f['hChToTauNu_labels'][...])
-        hToTauTau = np.array(f['hToTauTau'][...])
-        hToTauTau_labels = np.array(f['hToTauTau_labels'][...])
-    #Concatenate the features
-    features = np.concatenate((x_test, leptoquark, ato4l, hChToTauNu, hToTauTau), axis=0)# [:,[0,3,6,15,18,27]] #Try selecting just important pTs
-    target = np.concatenate((labels_test, leptoquark_labels, ato4l_labels, hChToTauNu_labels, hToTauTau_labels), axis=0)
-    ###
+    features_BKG = x_test
+    target_BKG = labels_test
+    #Blackbox
+    features_BB = np.load(f"/eos/user/k/kmetzger/test/nplm/blackbox/BBsplits57D/split{args.slice}.npy").reshape(-1,19,3,1)
+    target_BB = np.ones(len(features_BB))*4
+    #Preprocess the black box with the same parameters, saved in file scaling_file.npz
+    features_BB = zscore_preprocess(features_BB, train=False, scaling_file="scaling_file.npz")
+    #Save the original source data as well
+    features_BKG_source = features_BKG.copy()
+    features_BB_source = features_BB.copy()
     ###Inference to get the embedding
     if args.inference:
         model_name = args.model_name
-        features = inference(model_name, features, target).astype(np.float64)
-    ###
+        features_BKG = inference(model_name, features_BKG, target_BKG).astype(np.float64)
+        features_BB = inference(model_name, features_BB, target_BB).astype(np.float64)
+    
     #Print shapes
-    print(f'Shape of the features: {np.shape(features)}')
-    print(f'and of type: {type(features)}')
-    print(f'Shape of the target: {np.shape(target)}')
-    print(f'and of type: {type(target)}')
-    # select SIG and BKG classes
-    mask_SIG = np.zeros_like(target)
-    mask_BKG = np.zeros_like(target)
-    for sig_label in sig_labels:
-        mask_SIG += 1*(target==sig_label)
-    for bkg_label in bkg_labels:
-        mask_BKG += 1*(target==bkg_label)
-
-    features_SIG = features[mask_SIG>0]
-    features_BKG = features[mask_BKG>0]
+    print(f'Shape of the features: {np.shape(features_BKG)}')
+    print(f'and of type: {type(features_BKG)}')
+    print(f'Shape of the target: {np.shape(target_BKG)}')
+    print(f'and of type: {type(target_BKG)}')
 
 
     ######## standardizes data
@@ -79,8 +61,11 @@ def main(args):
     features_mean, features_std = np.mean(features_BKG, axis=0), np.std(features_BKG, axis=0)
     print('mean: ', features_mean)
     print('std: ', features_std)
+    features_mean_BB, features_std_BB = np.mean(features_BB, axis=0), np.std(features_BB, axis=0)
+    print('mean: ', features_mean_BB)
+    print('std: ', features_std_BB)
     features_BKG = standardize(features_BKG, features_mean, features_std)
-    features_SIG = standardize(features_SIG, features_mean, features_std)
+    features_BB = standardize(features_BB, features_mean_BB, features_std_BB)
 
     #### compute sigma hyper parameter from data
     #### sigma is the gaussian kernels width. 
@@ -90,32 +75,55 @@ def main(args):
     flk_sigma = candidate_sigma(features_BKG[:2000, :], perc=flk_sigma_perc)
     print('flk_sigma', flk_sigma)
 
+
     N_ref = args.size_ref # number of reference datapoints (mixture of non-anomalous classes)
-    N_bkg = args.size_back # number of backgroun datapoints in the data (mixture of non-anomalous classes present in the data)
-    N_sig = 0 # number of signal datapoints in the data (mixture of anomalous classes present in the data)
+    N_bkg = args.size_back # number of background datapoints in the data (mixture of non-anomalous classes present in the data)
+    #N_sig = 0 # number of signal datapoints in the data (mixture of anomalous classes present in the data)
     w_ref = N_bkg*1./N_ref
+    N_BB = len(features_BB)
+
+    ## details about the save path                                                                                                                               
+    folder_out = './out/runs409_BB_RECO/'
+    string = f'BB-SL{args.slice}'
+    NP = '%s_NR%i_NB%i_NBB%i_M%i_lam%s_iter%i/'%(string, N_ref, N_bkg, N_BB,
+                                                    M, str(lam), iterations)
+    if not os.path.exists(folder_out+NP):
+        os.makedirs(folder_out+NP)
 
     xlabels = [f"dim_{i}" for i in range(4)]
     ## run toys
     print('Start running toys')
     t0=np.array([])
+    """ pred0 = np.array([])
+    bkg0 = np.array([])
+    ref0 = np.array([])
+    bkg0_source = np.array([])
+    ref0_source = np.array([]) """
     seeds = np.random.uniform(low=1, high=100000, size=(Ntoys,))
     for i in range(Ntoys):
         seed = int(seeds[i])
         rng = np.random.default_rng(seed=seed)
         N_bkg_p = rng.poisson(lam=N_bkg, size=1)[0]
-        N_sig_p = rng.poisson(lam=N_sig, size=1)[0]
-        rng.shuffle(features_SIG)
-        rng.shuffle(features_BKG)
-        features_s = features_SIG[:N_sig_p, :]
-        features_b = features_BKG[:N_bkg_p+N_ref, :]
-        features  = np.concatenate((features_s,features_b), axis=0)
+        perm = rng.permutation(features_BKG.shape[0])
+        #N_sig_p = rng.poisson(lam=N_sig, size=1)[0]
+        #rng.shuffle(features_SIG)
+        #rng.shuffle(features_BKG)
+        features_BKG = features_BKG[perm]
+        features_BKG_source = features_BKG_source[perm]
+        #features_s = features_SIG[:N_sig_p, :]
+        features = features_BKG[:N_bkg_p+N_ref, :]
+        features_source = features_BKG_source[:N_bkg_p+N_ref, :]
 
         label_R = np.zeros((N_ref,))
-        label_D = np.ones((N_bkg_p+N_sig_p, ))
+        label_D = np.ones((N_bkg_p, ))
         labels  = np.concatenate((label_D,label_R), axis=0)
+
+        bkg0 = features[:N_bkg_p, :].copy()
+        ref0 = features[N_bkg_p:N_bkg_p+N_ref, :].copy()
+        bkg0_source = features_source[:N_bkg_p, :].copy()
+        ref0_source = features_source[N_bkg_p:N_bkg_p+N_ref, :].copy()
         
-        plot_reco=False
+        plot_reco=True
         verbose=False
         # make reconstruction plots every 20 toys (can be changed)
         #if not i%20:
@@ -123,38 +131,52 @@ def main(args):
         #    verbose=True
         flk_config = get_logflk_config(M,flk_sigma,[lam],weight=w_ref,iter=[iterations],seed=None,cpu=False)
         t, pred = run_toy('t0', features, labels, weight=w_ref, seed=seed,
-                        flk_config=flk_config, output_path='./', plot=plot_reco, savefig=plot_reco,
+                        flk_config=flk_config, output_path=f'{folder_out+NP}/', plot=plot_reco, savefig=plot_reco,
                         verbose=verbose, xlabels=xlabels)
         
         t0 = np.append(t0, t)
+        pred0 = pred
 
 
-    N_ref = args.size_ref # number of reference datapoints (mixture of non-anomalous classes)
-    N_bkg = args.size_back # number of backgroun datapoints in the data (mixture of non-anomalous classes present in the data)
-    N_sig = args.size_sig # number of signal datapoints in the data (mixture of anomalous classes present in the data)
-    w_ref = N_bkg*1./N_ref
-
+    
+    w_ref = N_BB*1./N_ref
 
     ## run toys
     print('Start running toys')
     t1=np.array([])
+    """ pred1 = np.array([])
+    bb1 = np.array([])
+    ref1 = np.array([])
+    bb1_source = np.array([])
+    ref1_source = np.array([]) """
     seeds = np.random.uniform(low=1, high=100000, size=(Ntoys,))
     for i in range(Ntoys):
         seed = int(seeds[i])
         rng = np.random.default_rng(seed=seed)
-        N_bkg_p = rng.poisson(lam=N_bkg, size=1)[0]
-        N_sig_p = rng.poisson(lam=N_sig, size=1)[0]
-        rng.shuffle(features_SIG)
-        rng.shuffle(features_BKG)
-        features_s = features_SIG[:N_sig_p, :]
-        features_b = features_BKG[:N_bkg_p+N_ref, :]
-        features  = np.concatenate((features_s,features_b), axis=0)
+        #N_bkg_p = rng.poisson(lam=N_bkg, size=1)[0]
+        #N_sig_p = rng.poisson(lam=N_sig, size=1)[0]
+        permBB = rng.permutation(features_BB.shape[0])
+        permBKG = rng.permutation(features_BKG.shape[0])
+        #rng.shuffle(features_BB)
+        features_BB = features_BB[permBB]
+        features_BB_source = features_BB_source[permBB]
+        #rng.shuffle(features_BKG)
+        features_BKG = features_BKG[permBKG]
+        features_BKG_source = features_BKG_source[permBKG]
+        #features_s = features_SIG[:N_sig_p, :]
+        features_b = features_BKG[:N_ref, :]
+        features  = np.concatenate((features_BB,features_b), axis=0)
 
         label_R = np.zeros((N_ref,))
-        label_D = np.ones((N_bkg_p+N_sig_p, ))
+        label_D = np.ones((N_BB, ))
         labels  = np.concatenate((label_D,label_R), axis=0)
+
+        bb1 = features_BB.copy()
+        ref1 = features_b[:N_ref, :].copy()
+        bb1_source = features_BB_source.copy()
+        ref1_source = features_source[:N_ref, :].copy()
         
-        plot_reco=False
+        plot_reco=True
         verbose=False
         # make reconstruction plots every 20 toys (can be changed)
         #if not i%20:
@@ -162,26 +184,31 @@ def main(args):
         #    verbose=True
         flk_config = get_logflk_config(M,flk_sigma,[lam],weight=w_ref,iter=[iterations],seed=None,cpu=False)
         t, pred = run_toy('t1', features, labels, weight=w_ref, seed=seed,
-                        flk_config=flk_config, output_path='./', plot=plot_reco, savefig=plot_reco,
+                        flk_config=flk_config, output_path=f'{folder_out+NP}/', plot=plot_reco, savefig=plot_reco,
                         verbose=verbose, xlabels=xlabels)
         
         t1 = np.append(t1, t)
+        pred1 = pred
 
 
-    ## details about the save path                                                                                                                               
-    folder_out = './out/runs389v2/'
-    sig_string = ''
-    if N_sig:
-        sig_string+='_SIG'
-        for s in sig_labels:
-            sig_string+='-%i'%(s)
-    NP = '%s_NR%i_NB%i_NS%i_M%i_lam%s_iter%i/'%(sig_string, N_ref, N_bkg, N_sig,
-                                                    M, str(lam), iterations)
-    if not os.path.exists(folder_out+NP):
-        os.makedirs(folder_out+NP)
-
+    #Save the log-likelihood ratios
     np.save(f'{folder_out+NP}/t0.npy', t0)
     np.save(f'{folder_out+NP}/t1.npy', t1)
+    #Save the model predictions
+    np.save(f'{folder_out+NP}/pred0.npy', pred0)
+    np.save(f'{folder_out+NP}/pred1.npy', pred1)
+    #Save the source and the inference data input to NPLM for all the toys
+    if not os.path.exists(f'{folder_out+NP}data_input/'):
+        os.makedirs(f'{folder_out+NP}data_input/')
+    np.save(f'{folder_out+NP}data_input/bkg0.npy', bkg0)
+    np.save(f'{folder_out+NP}data_input/bkg0_source.npy', bkg0_source)
+    np.save(f'{folder_out+NP}data_input/ref0.npy', ref0)
+    np.save(f'{folder_out+NP}data_input/ref0_source.npy', ref0_source)
+
+    np.save(f'{folder_out+NP}data_input/bb1.npy', bb1)
+    np.save(f'{folder_out+NP}data_input/bb1_source.npy', bb1_source)
+    np.save(f'{folder_out+NP}data_input/ref1.npy', ref1)
+    np.save(f'{folder_out+NP}data_input/ref1_source.npy', ref1_source)
 
 #Run inference given a pytorch model and the model weights for the test dataset
 def inference(model_name, input_data, input_labels, device=None):
@@ -197,7 +224,7 @@ def inference(model_name, input_data, input_labels, device=None):
         input_dim=3, 
         model_dim=64, 
         output_dim=64, 
-        embed_dim=64,
+        embed_dim=4,
         n_heads=8, 
         dim_feedforward=256, 
         n_layers=4,
@@ -247,6 +274,37 @@ class TorchCLDataset(Dataset):
 
         return X, y
   
+def zscore_preprocess(
+    input_array,
+    train=False,
+    scaling_file=None
+    ):
+    '''
+    Normalizes using zscore scaling along pT only ->  x' = (x - μ) / σ
+    Assumes (μ, σ) constants determined by average across training batch
+    '''
+    # Loads input as tensor and (μ, σ) constants predetermined from training batch.
+    if train:
+        tensor = input_array.copy()
+        mu = np.mean(tensor[:,:,0,:])
+        sigma = np.std(tensor[:,:,0,:])
+        np.savez(scaling_file, mu=mu, sigma=sigma)
+        print(f"Mu: {mu}, sigma: {sigma}")
+        normalized_tensor = (tensor - mu) / sigma
+
+    else:
+        tensor = input_array.copy()
+        scaling_const = np.load(scaling_file)
+        normalized_tensor = (tensor - scaling_const['mu']) / scaling_const['sigma']
+
+    # Masking so unrecorded data remains 0
+    mask = np.not_equal(input_array, 0)
+    mask = np.squeeze(mask, -1)
+
+    # Outputs normalized pT while preserving original values for eta and phi
+    outputs = np.concatenate([normalized_tensor[:,:,0,:], input_array[:,:,1,:], input_array[:,:,2,:]], axis=2)
+    return np.reshape(outputs * mask, (-1, 57))
+  
 if __name__=='__main__':
     # Parses terminal command
     parser = ArgumentParser()
@@ -254,11 +312,11 @@ if __name__=='__main__':
     parser.add_argument('--inference', action='store_true')
     parser.add_argument('--model_name', default="models/runs247/vae2.pth", type=str)
     #TODO: Add the pars arguments for ref, back, sig sizes and kernel hyperparams
-    parser.add_argument('--signal', default=4, type=int)
+    parser.add_argument('--slice', default=0, type=int)
     parser.add_argument('--n_toys', default=100, type=int)
     parser.add_argument('--size_ref', default=1000000, type=int)
     parser.add_argument('--size_back', default=100000, type=int)
-    parser.add_argument('--size_sig', default=1000, type=int)
+    #parser.add_argument('--size_sig', default=1000, type=int)
     args = parser.parse_args()
     main(args)
 

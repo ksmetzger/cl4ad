@@ -58,7 +58,7 @@ def main(args, train_idx, val_idx):
         feat_std = np.std(train_fold.reshape(-1, feat_dim), axis=0),
     )
     #Initialize transform (empty list: None)
-    transform = augmentations.Transform(["naive_masking"], feat_dim)
+    transform = augmentations.Transform(["gaussian_resampling"], feat_dim)
     
     train_data_loader = DataLoader(
         TorchCLDataset(train_fold.reshape(-1,feat_dim), labels_train_fold.reshape(-1), device),
@@ -135,9 +135,9 @@ def main(args, train_idx, val_idx):
                 embedded_values_orig = model(transform(val).reshape(-1,128,4).to(device=device))
                 embedded_values_aug = model(transform(val).reshape(-1,128,4).to(device=device))
             else:
-                #embedded_values_orig = model(transform(val).to(device=device))
-                #embedded_values_aug = model(transform(val).to(device=device))
-                pass
+                embedded_values_orig = model(transform(val).to(device=device))
+                embedded_values_aug = model(transform(val).to(device=device))
+                #pass
             #embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
             #embedded_values_orig = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0), device=device, rand_number=0))
             #embedded_values_aug = model(first_val_repeated)
@@ -145,16 +145,16 @@ def main(args, train_idx, val_idx):
             #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
             #embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
             #embedded_values_aug = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42))
-            #feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
+            feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
             #similar_embedding_loss = criterion(embedded_values_orig, embedded_values_aug)
 
-            #similar_embedding_loss = criterion(feature)
+            similar_embedding_loss = criterion(feature)
             
             #For supervised input, only give one view
-            embedded_values_orig = model(val.to(device))
-            feature = embedded_values_orig.unsqueeze(dim=1)
+            #embedded_values_orig = model(val.to(device))
+            #feature = embedded_values_orig.unsqueeze(dim=1)
 
-            similar_embedding_loss = criterion(feature, labels.reshape(-1))
+            #similar_embedding_loss = criterion(feature, labels.reshape(-1))
 
             optimizer.zero_grad()
             similar_embedding_loss.backward()
@@ -186,9 +186,9 @@ def main(args, train_idx, val_idx):
                     embedded_values_orig = model(transform(val).reshape(-1,128,4).to(device=device))
                     embedded_values_aug = model(transform(val).reshape(-1,128,4).to(device=device))
                 else:
-                    #embedded_values_orig = model(transform(val).to(device=device))
-                    #embedded_values_aug = model(transform(val).to(device=device))
-                    pass
+                    embedded_values_orig = model(transform(val).to(device=device))
+                    embedded_values_aug = model(transform(val).to(device=device))
+                    #pass
                 #embedded_values_orig = model(val)
                 #embedded_values_orig = model(augmentations.naive_masking(val,device=device, rand_number=0))
                 #embedded_values_aug = model(first_val_repeated)
@@ -197,16 +197,16 @@ def main(args, train_idx, val_idx):
                 #embedded_values_aug = model((augmentations.permutation(augmentations.rot_around_beamline(val, device=device), device=device)).reshape(-1,19,3))
                 #embedded_values_aug = model(augmentations.naive_masking(val,device=device, rand_number=42))
                 #embedded_values_aug = model(augmentations.permutation(augmentations.rot_around_beamline(augmentations.gaussian_resampling_pT(augmentations.naive_masking(val, device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42), device=device, rand_number=42))
-                #feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
+                feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
                 #similar_embedding_loss = criterion(embedded_values_orig, embedded_values_aug)
                 
-                #similar_embedding_loss = criterion(feature)
+                similar_embedding_loss = criterion(feature)
 
                 #For supervised input, only give one view
-                embedded_values_orig = model(val.to(device))
-                feature = embedded_values_orig.unsqueeze(dim=1)
+                #embedded_values_orig = model(val.to(device))
+                #feature = embedded_values_orig.unsqueeze(dim=1)
                 
-                similar_embedding_loss = criterion(feature, labels.reshape(-1))
+                #similar_embedding_loss = criterion(feature, labels.reshape(-1))
 
                 running_sim_loss += similar_embedding_loss.item()
                 if idx % 50 == 0:
@@ -233,7 +233,7 @@ def main(args, train_idx, val_idx):
             print(f'EPOCH {epoch}')
             temp_time= time.time()
             #Adjust the learning rate with Version 2 schedule (see OneNote)
-            lr = adjust_learning_rate(args, 10, epoch, optimizer, base_lr=0.3)
+            lr = adjust_learning_rate(args, 10, epoch, optimizer, base_lr=0.2)
             print("current Learning rate: ", lr)
             writer.add_scalar('Learning_rate', lr, epoch)
             # Gradient tracking

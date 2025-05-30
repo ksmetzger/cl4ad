@@ -163,7 +163,7 @@ class ADC_Signal():
     def create_labels(self, data):
         for i_key, key in enumerate(self.data.copy().keys()):
             anomaly_dataset_i = self.data[key][:]
-            print(f"making datasets for {key} anomaly with shape {anomaly_dataset_i.shape}")
+            print(f"making datasets for {key} anomaly with shape {anomaly_dataset_i.shape} with label {i_key+4}")
 
             labels = np.ones(anomaly_dataset_i.shape[0])*(i_key+4)
             data[f"{key}_labels"] = labels
@@ -288,7 +288,7 @@ def zscore_preprocess(
         mu = np.mean(tensor[:,:,0,:])
         sigma = np.std(tensor[:,:,0,:])
         np.savez(scaling_file, mu=mu, sigma=sigma)
-
+        print(f"Mu: {mu}, sigma: {sigma}")
         normalized_tensor = (tensor - mu) / sigma
 
     else:
@@ -310,13 +310,14 @@ def main(args):
     random.seed(args.seed)
 
     #Create the dataset
-    #dataset = ADC_Dataset(args)
-    dataset = ADC_Dataset_balanced(args)
+    dataset = ADC_Dataset(args)
+    #dataset = ADC_Dataset_balanced(args)
     #dataset = JetClass_Dataset(args)
+    #dataset = ADC_Signal(args)
     #Print stats
     dataset.print_stats()
     #Save the h5 file
-    dataset.save_as_h5()
+    #dataset.save_as_h5()
     #dataset = ADC_Signal(args)
     #dataset.save_as_h5()
 if __name__=='__main__':

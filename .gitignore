@@ -21,4 +21,9 @@ output_tuner
 nplm/out
 nplm/savefigs
 nplm/savefigs_paper
+nplm/savefigs_paper_cmsstyle
+nplm/test_ratios
+nplm/blackbox
+nplm/examples
 nplm/*.md
+*.zip
