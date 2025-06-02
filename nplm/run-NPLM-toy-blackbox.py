@@ -256,8 +256,8 @@ if __name__=='__main__':
     parser = ArgumentParser()
     #Whether to do inference for embedding the dataset
     parser.add_argument('--inference', action='store_true')
-    parser.add_argument('--model_name', default="models/runs247/vae2.pth", type=str)
-    parser.add_argument('--output_name', default="runs247", type=str)
+    parser.add_argument('--model_name', default="models/runs409/vae4.pth", type=str)
+    parser.add_argument('--output_name', default="runs409", type=str)
     parser.add_argument('--slice', default=0, type=int)
     parser.add_argument('--n_toys', default=100, type=int)
     parser.add_argument('--size_ref', default=1000000, type=int)
