@@ -30,7 +30,7 @@ class TransformerEncoder(nn.Module):
 
         #encoder part from pytorch
         self.embedding = nn.Linear(input_dim, model_dim)
-        #Get a pre-norm tranformer encoder from pytorch
+        #Get a (pre-norm) transformer encoder from pytorch
         self.transformer = nn.TransformerEncoder(nn.TransformerEncoderLayer(model_dim, n_heads, dim_feedforward=dim_feedforward, dropout=dropout), n_layers) #, norm_first=True
         self.dino_head = DINOHead(in_dim=self.embed_dim, out_dim=self.output_dim, hidden_dim=self.hidden_dim_dino_head, bottleneck_dim=self.bottleneck_dim_dino_head, norm_last_layer=self.norm_last_layer)
         #self.simclr_head = SimCLRHead(in_dim=self.embed_dim, out_dim=self.output_dim, hidden_dim=[32])
@@ -50,29 +50,19 @@ class TransformerEncoder(nn.Module):
             mask, pT_zero = self.make_src_key_padding_mask(x_before_augmentation, mode=self.mode)
         self.batch_size = x.shape[0]
         #Create embedding for tranformer input
-        #print(f"X-before embedding: {x}")
-        #print(f"Is NAN? : {torch.isnan(x).sum()}")
         x = self.embedding(x)
-        #print(f"X-after embedding: {x}")
-        #print(f"Is NAN? : {torch.isnan(x).sum()}")
         #Add CLS token
         if self.mode=='cls':
             cls_tokens = self.cls_token.expand(self.batch_size, -1, -1)
             x = torch.cat((cls_tokens, x), dim=1)
-        #print(f"X-before transposing: {x}")
         #Transpose (bsz, n_const, model_dim) -> (n_const, bsz, model_dim) for transformer input
         x = torch.transpose(x,0,1)
-        #print(f"X-before pos-encoding: {x}")
         #If pos_encoding = True, apply positional encoding
         if self.pos_encoding:
             x = self.pos_encoder(x * math.sqrt(self.model_dim))
         #Input to transformer encoder
-        #print(f"X-before transformer: {x}")
-        #print(f"Is NAN? : {torch.isnan(x).sum()}")
         #x = self.transformer(x, mask=mask)
         x = self.transformer(x, src_key_padding_mask = mask)
-        #print(f"X-after trafo: {x}")
-        #print(f"Is NAN? : {torch.isnan(x).sum()}")
         #Only take [CLS] token and input into DINO head
         if self.mode == 'cls':
             x = x[0,...]
@@ -86,9 +76,6 @@ class TransformerEncoder(nn.Module):
                 x = x_sum / denom.clamp(min=1)
                 #Where there are no particles set mean to zero
                 x[denom == 0] = 0
-                #print(f"x-shape: {x.shape}")
-                #print(f"x: {x}")
-                #print(f"Is NAN? : {torch.isnan(x).sum()}")
             else:
                 x = x.mean(dim=0)
         elif self.mode == 'max':
@@ -97,7 +84,7 @@ class TransformerEncoder(nn.Module):
             x = torch.transpose(x,0,1)
             x = x.reshape(x.shape[0], -1)
             x = self.flatten_output(x)
-        #If downsize to lower dimension run throught the MLP
+        #If downsize to lower dimension run through the MLP
         if self.mode != 'flatten':
             x = self.downsize(x)
         return x
@@ -107,8 +94,6 @@ class TransformerEncoder(nn.Module):
         x = self.representation(x, x_before_augmentation)
         x = self.dino_head(x)
         #x = self.simclr_head(x)
-        #print(f"X-after DINO: {x}")
-        #print(f"Is NAN? : {torch.isnan(x).sum()}")
         return x
     
     def make_mask(self, x, mode):

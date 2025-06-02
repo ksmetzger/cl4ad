@@ -34,12 +34,12 @@ def main(args):
 
     ###Load the dataset
     #Background
-    with h5py.File(f'/eos/user/k/kmetzger/test/dino/ADC_Delphes_original_divisions.hdf5', 'r') as f:
+    with h5py.File(f'ADC_Delphes_original_divisions.hdf5', 'r') as f:
         x_test = np.array(f['x_test'][...])
         labels_test = np.array(f['labels_test'][...])
     print(f"Background dataset contains {len(labels_test)} events!")
     #Signal
-    with h5py.File(f'/eos/user/k/kmetzger/test/dino/ADC_Delphes_signals.hdf5', 'r') as f:
+    with h5py.File(f'ADC_Delphes_signals.hdf5', 'r') as f:
         leptoquark = np.array(f['leptoquark'][...])
         leptoquark_labels = np.array(f['leptoquark_labels'][...])
         ato4l = np.array(f['ato4l'][...])
@@ -169,7 +169,7 @@ def main(args):
 
 
     ## details about the save path                                                                                                                               
-    folder_out = './out/runs389v2/'
+    folder_out = f'./out/{args.output_name}/'
     sig_string = ''
     if N_sig:
         sig_string+='_SIG'
@@ -197,7 +197,7 @@ def inference(model_name, input_data, input_labels, device=None):
         input_dim=3, 
         model_dim=64, 
         output_dim=64, 
-        embed_dim=64,
+        embed_dim=4,
         n_heads=8, 
         dim_feedforward=256, 
         n_layers=4,
@@ -208,12 +208,7 @@ def inference(model_name, input_data, input_labels, device=None):
         mode='cls',
         dropout=0.025,
         )
-    #model = SimpleDense(latent_dim=12).to(device)
-    #model = SimpleDense_small().to(device)
-    #model = DeepSets(latent_dim=6).to(device)
-    #model = CVAE(latent_dim=6).to(device)
-    #model = SimpleDense_JetClass(latent_dim=6).to(device)
-    #model = CVAE_JetClass(latent_dim=6).to(device)
+
     ###model = SimpleDense_ADC(latent_dim=6).to(device)
     model = TransformerEncoder(**transformer_args_standard)
     model.load_state_dict(torch.load(model_name, map_location=torch.device(device)))
@@ -253,7 +248,7 @@ if __name__=='__main__':
     #Whether to do inference for embedding the dataset
     parser.add_argument('--inference', action='store_true')
     parser.add_argument('--model_name', default="models/runs247/vae2.pth", type=str)
-    #TODO: Add the pars arguments for ref, back, sig sizes and kernel hyperparams
+    parser.add_argument('--output_name', default="runs247", type=str)
     parser.add_argument('--signal', default=4, type=int)
     parser.add_argument('--n_toys', default=100, type=int)
     parser.add_argument('--size_ref', default=1000000, type=int)

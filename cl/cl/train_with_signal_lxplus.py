@@ -11,7 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 #from torchsummary import summary
 
 import losses
-from models import CVAE, SimpleDense, DeepSets, SimpleDense_small, SimpleDense_JetClass, CVAE_JetClass
+from models import CVAE, SimpleDense, DeepSets, SimpleDense_small, SimpleDense_JetClass, CVAE_JetClass, SimpleDense_ADC
 from transformer import TransformerEncoder
 import augmentations
 import math
@@ -95,7 +95,7 @@ def main(args, train_idx, val_idx):
         )
         model = TransformerEncoder(**transformer_args_jetclass).to(device)
         #summary(model, input_size=(128,4))
-    else:
+    elif args.type == 'Delphes':
         transformer_args_standard = dict(
         input_dim=3, 
         model_dim=64, 
@@ -111,57 +111,15 @@ def main(args, train_idx, val_idx):
         mode='cls',
         dropout=0.025,
         )
-        transformer_args_half = dict(
-        input_dim=3, 
-        model_dim=32, 
-        output_dim=64, 
-        embed_dim=6,
-        n_heads=4, 
-        dim_feedforward=64, 
-        n_layers=3,
-        hidden_dim_dino_head=128,
-        bottleneck_dim_dino_head=32,
-        pos_encoding = False,
-        use_mask = False,
-        mode='flatten',
-        dropout=0,
-        )
-        transformer_args_tiny = dict(
-        input_dim=3, 
-        model_dim=16, 
-        output_dim=64, 
-        embed_dim=32,
-        n_heads=8, 
-        dim_feedforward=16, 
-        n_layers=2,
-        hidden_dim_dino_head=128,
-        bottleneck_dim_dino_head=32,
-        pos_encoding = True,
-        use_mask = True,
-        mode='flatten',
-        dropout=0,
-        )
-        transformer_args_large = dict(
-        input_dim=3, 
-        model_dim=128, 
-        output_dim=128, 
-        embed_dim=6,
-        n_heads=8, 
-        dim_feedforward=512, 
-        n_layers=6,
-        hidden_dim_dino_head=128,
-        bottleneck_dim_dino_head=64,
-        pos_encoding = False,
-        use_mask = False,
-        mode='flatten',
-        dropout=0,
-        )
+        
         model = TransformerEncoder(**transformer_args_standard).to(device)
         #summary(model, input_size=(57,))
+    else:
+        assert False
 
-    #criterion = losses.SimCLRLoss()
-    #criterion = losses.VICRegLoss(inv_weight=10, var_weight=25, cov_weight=10)
+    #Setup SimCLR loss: defaults to self-supervised version if no labels are given
     criterion = losses.SimCLRloss_nolabels_fast(temperature=args.loss_temp, base_temperature=args.loss_temp, contrast_mode='one')
+
     #Standard schedule
     """ optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-3) #Adams pytorch impl. of weight decay is equiv. to the L2 penalty.
     scheduler_1 = torch.optim.lr_scheduler.ConstantLR(optimizer, total_iters=5)
@@ -186,22 +144,32 @@ def main(args, train_idx, val_idx):
                 continue
             
             #For self-supervised input transform two views: original and augmented
-            """ if 'Transformer' in args.type:
-                    embedded_values_orig = model(transform(val).reshape(-1,128,4).to(device=device))
-                    embedded_values_aug = model(transform(val).reshape(-1,128,4).to(device=device))
-            else:
-                embedded_values_orig = model(transform(val).reshape(-1,19,3).to(device=device), val.reshape(-1,19,3).to(device=device))
-                embedded_values_aug = model(transform(val).reshape(-1,19,3).to(device=device), val.reshape(-1,19,3).to(device=device))
+            if args.supervision == 'selfsupervised':
+                if args.type == 'JetClass_Transformer':
+                    embedded_values_orig = model(transform(val).reshape(-1,128,4).to(device=device), val.reshape(-1,128,4).to(device=device))
+                    embedded_values_aug = model(transform(val).reshape(-1,128,4).to(device=device), val.reshape(-1,128,4).to(device=device))
+                elif args.type == 'JetClass':
+                    embedded_values_orig = model(transform(val).to(device=device))
+                    embedded_values_aug = model(transform(val).to(device=device))
+                elif args.type == 'Delphes':
+                    embedded_values_orig = model(transform(val).reshape(-1,19,3).to(device=device), val.reshape(-1,19,3).to(device=device))
+                    embedded_values_aug = model(transform(val).reshape(-1,19,3).to(device=device), val.reshape(-1,19,3).to(device=device))
 
-            feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
-            #similar_embedding_loss = criterion(embedded_values_orig, embedded_values_aug)
-            similar_embedding_loss = criterion(feature) """
-            
+                feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
+                #similar_embedding_loss = criterion(embedded_values_orig, embedded_values_aug)
+                similar_embedding_loss = criterion(feature)
+
             #For supervised input, only give one view
-            embedded_values_orig = model(val)
-            feature = embedded_values_orig.unsqueeze(dim=1)
+            elif args.supervision == 'supervised':
+                if args.type == 'JetClass_Transformer':
+                    embedded_values_orig = model(val.reshape(-1,128,4).to(device=device), val.reshape(-1,128,4).to(device=device))
+                elif args.type == 'JetClass':
+                    embedded_values_orig = model(val.to(device=device))
+                elif args.type == 'Delphes':
+                    embedded_values_orig = model(val.reshape(-1,19,3).to(device=device), val.reshape(-1,19,3).to(device=device))
 
-            similar_embedding_loss = criterion(feature, labels.reshape(-1))
+                feature = embedded_values_orig.unsqueeze(dim=1)
+                similar_embedding_loss = criterion(feature, labels.reshape(-1))
 
             optimizer.zero_grad()
             similar_embedding_loss.backward()
@@ -228,22 +196,32 @@ def main(args, train_idx, val_idx):
                     continue
 
                 #For self-supervised input transform two views: original and augmented
-                """ if 'Transformer' in args.type:
-                    embedded_values_orig = model(transform(val).reshape(-1,128,4).to(device=device))
-                    embedded_values_aug = model(transform(val).reshape(-1,128,4).to(device=device))
-                else:
-                    embedded_values_orig = model(transform(val).reshape(-1,19,3).to(device=device), val.reshape(-1,19,3).to(device=device))
-                    embedded_values_aug = model(transform(val).reshape(-1,19,3).to(device=device), val.reshape(-1,19,3).to(device=device))
-                
-                feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
-                #similar_embedding_loss = criterion(embedded_values_orig, embedded_values_aug)
-                similar_embedding_loss = criterion(feature) """
+                if args.supervision == 'selfsupervised':
+                    if args.type == 'JetClass_Transformer':
+                        embedded_values_orig = model(transform(val).reshape(-1,128,4).to(device=device), val.reshape(-1,128,4).to(device=device))
+                        embedded_values_aug = model(transform(val).reshape(-1,128,4).to(device=device), val.reshape(-1,128,4).to(device=device))
+                    elif args.type == 'JetClass':
+                        embedded_values_orig = model(transform(val).to(device=device))
+                        embedded_values_aug = model(transform(val).to(device=device))
+                    elif args.type == 'Delphes':
+                        embedded_values_orig = model(transform(val).reshape(-1,19,3).to(device=device), val.reshape(-1,19,3).to(device=device))
+                        embedded_values_aug = model(transform(val).reshape(-1,19,3).to(device=device), val.reshape(-1,19,3).to(device=device))
+
+                    feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
+                    #similar_embedding_loss = criterion(embedded_values_orig, embedded_values_aug)
+                    similar_embedding_loss = criterion(feature)
 
                 #For supervised input, only give one view
-                embedded_values_orig = model(val)
-                feature = embedded_values_orig.unsqueeze(dim=1)
-                
-                similar_embedding_loss = criterion(feature, labels.reshape(-1))
+                elif args.supervision == 'supervised':
+                    if args.type == 'JetClass_Transformer':
+                        embedded_values_orig = model(val.reshape(-1,128,4).to(device=device), val.reshape(-1,128,4).to(device=device))
+                    elif args.type == 'JetClass':
+                        embedded_values_orig = model(val.to(device=device))
+                    elif args.type == 'Delphes':
+                        embedded_values_orig = model(val.reshape(-1,19,3).to(device=device), val.reshape(-1,19,3).to(device=device))
+
+                    feature = embedded_values_orig.unsqueeze(dim=1)
+                    similar_embedding_loss = criterion(feature, labels.reshape(-1))
 
                 running_sim_loss += similar_embedding_loss.item()
                 if idx % 50 == 0:
@@ -270,7 +248,7 @@ def main(args, train_idx, val_idx):
             print(f'EPOCH {epoch}')
             temp_time= time.time()
             #Adjust the learning rate with Version 2 schedule (see OneNote)
-            lr = adjust_learning_rate(args, 10, epoch, optimizer, base_lr=0.00025)
+            lr = adjust_learning_rate(args, 10, epoch, optimizer, base_lr=args.base_lr)
             print("current Learning rate: ", lr)
             writer.add_scalar('Learning_rate', lr, epoch)
             # Gradient tracking
@@ -409,8 +387,6 @@ class TorchCLDataset(Dataset):
         # Load data and get label
         X = self.features[index]
         y = self.labels[index]
-        #Normalize again (!!! has already been pre-normalized with z_score pT norm.)
-        #X = (X-self.mean)/self.std
 
         return X, y
 
@@ -465,17 +441,16 @@ if __name__ == '__main__':
     # If not using full data, name of smaller dataset to pull from
     parser.add_argument('dataset', type=str)
 
-    parser.add_argument('--epochs', type=int, default=1)
+    parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--batch-size', type=int, default=1024)
-    parser.add_argument('--loss-temp', type=float, default=0.8)
+    parser.add_argument('--loss-temp', type=float, default=0.1)
+    parser.add_argument('--base-lr', type=float, default=0.00025)
     parser.add_argument('--model-name', type=str, default='')
-    parser.add_argument('--scaling-filename', type=str)
     parser.add_argument('--output-filename', type=str, default='embedding.npz')
-    parser.add_argument('--sample-size', type=int, default=-1)
-    parser.add_argument('--mix-in-anomalies', action='store_true')
-    parser.add_argument('--latent-dim', type=int, default=48)
+    parser.add_argument('--latent-dim', type=int, default=4)
     parser.add_argument('--train', action='store_true')
     parser.add_argument('--type', choices=('Delphes', 'JetClass', 'JetClass_Transformer'))
+    parser.add_argument('--supervision', choices=('selfsupervised', 'supervised'))
     parser.add_argument('--k-fold', action='store_true')
 
     args = parser.parse_args()
