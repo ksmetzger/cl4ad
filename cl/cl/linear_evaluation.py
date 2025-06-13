@@ -25,21 +25,18 @@ def get_arguments():
     
     parser.add_argument('dataset', type=str)
 
-    parser.add_argument('--scaling-filename', type=str)
-    parser.add_argument('--sample-size', type=int, default=-1)
-
     parser.add_argument("--pretrained",default="output/runs1/vae.pth", type=Path, help="path to pretrained model weights")
     parser.add_argument("--epochs", default=10, type=int, metavar="N", help="number of epochs to train linear layer")
     parser.add_argument("--batch-size", default=1024, type=int, metavar="N")
     parser.add_argument("--weight-decay", default=1e-6, type=float, metavar="W", help="weight decay (for SGD and ADAM this is equivilant to the L2 penalty)")
     parser.add_argument("--lr", default=1e-3, type=float, metavar="N")
-    parser.add_argument("--arch", type=str, default="SimpleDense", help="Type of model used to train embedding (backbone)")
-    parser.add_argument("--num-classes", default=8, type=int, help="number of classes")
+    parser.add_argument("--arch", type=str, default="SimpleDense_ADC", help="Type of model used to train embedding (backbone)")
+    parser.add_argument("--num-classes", default=4, type=int, help="number of classes")
     parser.add_argument("--type", default="freeze", type=str, choices=("freeze", "finetune", "finetune_just_background"), help="Whether to freeze weights and train with full data on linear layer or finetune the model with a semi-supervised approach.")
     parser.add_argument("--percent", default=1, type=int, choices=(1,10,100), help="If finetune, choose percentage of labeled train data the model is finetuned on.")
     parser.add_argument('--head-name', type=str, default='output/head.pth')
     parser.add_argument('--backbone-name', type=str, default='output/backbone_finetuned.pth')
-    parser.add_argument('--latent-dim', type=int, default=48, help="Latent dimension of the embedding")
+    parser.add_argument('--latent-dim', type=int, default=4, help="Latent dimension of the embedding")
     parser.add_argument('--k-fold', type=int, default=-1, help="If a k-folded dataset is used, choose which fold is held out as the validation-set")
     return parser
 
@@ -146,61 +143,16 @@ def main():
         input_dim=3, 
         model_dim=64, 
         output_dim=64, 
-        embed_dim=6,
+        embed_dim=args.latent_dim,
         n_heads=8, 
         dim_feedforward=256, 
         n_layers=4,
         hidden_dim_dino_head=256,
         bottleneck_dim_dino_head=64,
-        pos_encoding = False,
-        use_mask = False,
-        mode='flatten',
-        dropout = 0,
-        )
-        transformer_args_half = dict(
-        input_dim=3, 
-        model_dim=32, 
-        output_dim=64, 
-        embed_dim=6,
-        n_heads=4, 
-        dim_feedforward=64, 
-        n_layers=3,
-        hidden_dim_dino_head=128,
-        bottleneck_dim_dino_head=32,
-        pos_encoding = False,
-        use_mask = False,
-        mode='flatten',
-        dropout=0,
-        )
-        transformer_args_tiny = dict(
-        input_dim=3, 
-        model_dim=16, 
-        output_dim=64, 
-        embed_dim=32,
-        n_heads=8, 
-        dim_feedforward=16, 
-        n_layers=2,
-        hidden_dim_dino_head=128,
-        bottleneck_dim_dino_head=32,
-        pos_encoding = True,
-        use_mask = True,
-        mode='flatten',
-        dropout=0,
-        )
-        transformer_args_large = dict(
-        input_dim=3, 
-        model_dim=128, 
-        output_dim=128, 
-        embed_dim=6,
-        n_heads=8, 
-        dim_feedforward=512, 
-        n_layers=6,
-        hidden_dim_dino_head=128,
-        bottleneck_dim_dino_head=64,
         pos_encoding = True,
         use_mask = False,
-        mode='flatten',
-        dropout=0,
+        mode='cls',
+        dropout = 0.025,
         )
         backbone = TransformerEncoder(**transformer_args_standard)
         embed_dim = transformer_args_standard["embed_dim"]

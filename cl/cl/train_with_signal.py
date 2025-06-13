@@ -177,33 +177,33 @@ def main(args, train_idx, val_idx):
                 if val.shape[0] != args.batch_size:
                     continue
 
-            #For self-supervised input transform two views: original and augmented
-            if args.supervision == 'selfsupervised':
-                if args.type == 'JetClass_Transformer':
-                    embedded_values_orig = model(transform(val).reshape(-1,128,4).to(device=device), val.reshape(-1,128,4).to(device=device))
-                    embedded_values_aug = model(transform(val).reshape(-1,128,4).to(device=device), val.reshape(-1,128,4).to(device=device))
-                elif args.type == 'JetClass':
-                    embedded_values_orig = model(transform(val).to(device=device))
-                    embedded_values_aug = model(transform(val).to(device=device))
-                elif args.type == 'Delphes':
-                    embedded_values_orig = model(transform(val).to(device=device))
-                    embedded_values_aug = model(transform(val).to(device=device))
+                #For self-supervised input transform two views: original and augmented
+                if args.supervision == 'selfsupervised':
+                    if args.type == 'JetClass_Transformer':
+                        embedded_values_orig = model(transform(val).reshape(-1,128,4).to(device=device), val.reshape(-1,128,4).to(device=device))
+                        embedded_values_aug = model(transform(val).reshape(-1,128,4).to(device=device), val.reshape(-1,128,4).to(device=device))
+                    elif args.type == 'JetClass':
+                        embedded_values_orig = model(transform(val).to(device=device))
+                        embedded_values_aug = model(transform(val).to(device=device))
+                    elif args.type == 'Delphes':
+                        embedded_values_orig = model(transform(val).to(device=device))
+                        embedded_values_aug = model(transform(val).to(device=device))
 
-                feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
-                #similar_embedding_loss = criterion(embedded_values_orig, embedded_values_aug)
-                similar_embedding_loss = criterion(feature)
+                    feature = torch.cat([embedded_values_orig.unsqueeze(dim=1),embedded_values_aug.unsqueeze(dim=1)],dim=1)
+                    #similar_embedding_loss = criterion(embedded_values_orig, embedded_values_aug)
+                    similar_embedding_loss = criterion(feature)
 
-            #For supervised input, only give one view
-            elif args.supervision == 'supervised':
-                if args.type == 'JetClass_Transformer':
-                    embedded_values_orig = model(val.reshape(-1,128,4).to(device=device), val.reshape(-1,128,4).to(device=device))
-                elif args.type == 'JetClass':
-                    embedded_values_orig = model(val.to(device=device))
-                elif args.type == 'Delphes':
-                    embedded_values_orig = model(val.to(device=device))
+                #For supervised input, only give one view
+                elif args.supervision == 'supervised':
+                    if args.type == 'JetClass_Transformer':
+                        embedded_values_orig = model(val.reshape(-1,128,4).to(device=device), val.reshape(-1,128,4).to(device=device))
+                    elif args.type == 'JetClass':
+                        embedded_values_orig = model(val.to(device=device))
+                    elif args.type == 'Delphes':
+                        embedded_values_orig = model(val.to(device=device))
 
-                feature = embedded_values_orig.unsqueeze(dim=1)
-                similar_embedding_loss = criterion(feature, labels.reshape(-1))
+                    feature = embedded_values_orig.unsqueeze(dim=1)
+                    similar_embedding_loss = criterion(feature, labels.reshape(-1))
 
                 running_sim_loss += similar_embedding_loss.item()
                 if idx % 50 == 0:
