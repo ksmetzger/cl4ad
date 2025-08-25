@@ -9,6 +9,7 @@ plots/
 src/._*
 src/*.pdf
 output
+ROC_curves_paper
 deep/
 .snakemake/
 results
